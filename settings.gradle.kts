@@ -1,6 +1,7 @@
-rootProject.name = "evilo"
-
 pluginManagement {
+    includeBuild("build-logic")
+    providers.gradleProperty("wasmline.localPath").orNull?.let { includeBuild(it) }
+
     repositories {
         google {
             mavenContent {
@@ -12,7 +13,21 @@ pluginManagement {
         mavenCentral()
         gradlePluginPortal()
     }
+
+    plugins {
+        id("org.gradle.toolchains.foojay-resolver-convention") version
+            providers.gradleProperty("foojayResolverVersion").get()
+    }
 }
+
+plugins {
+    id("org.gradle.toolchains.foojay-resolver-convention")
+}
+
+rootProject.name = "evilo"
+enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
+
+providers.gradleProperty("wasmline.localPath").orNull?.let { includeBuild(it) }
 
 dependencyResolutionManagement {
     repositories {
@@ -27,11 +42,6 @@ dependencyResolutionManagement {
     }
 }
 
-plugins {
-    id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
-}
-
-include(":androidApp")
-include(":desktopApp")
-include(":shared")
-include(":webApp")
+include(":app", ":app:android")
+include(":core:model", ":core:source-api", ":core:source-runtime")
+include(":feature:library")
