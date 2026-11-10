@@ -1,5 +1,5 @@
 pluginManagement {
-    includeBuild("build-logic")
+    includeBuild("evilo-build-logic")
     providers.gradleProperty("wasmline.localPath").orNull?.let { includeBuild(it) }
 
     repositories {
@@ -24,7 +24,7 @@ plugins {
     id("org.gradle.toolchains.foojay-resolver-convention")
 }
 
-rootProject.name = "evilo"
+rootProject.name = "evilo-root"
 enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
 
 providers.gradleProperty("wasmline.localPath").orNull?.let { includeBuild(it) }
@@ -42,6 +42,11 @@ dependencyResolutionManagement {
     }
 }
 
-include(":app", ":app:android")
-include(":core:model", ":core:source-api", ":core:source-runtime")
-include(":feature:library")
+include(
+    ":evilo-library",
+    ":evilo-core",
+    ":evilo-app",
+    ":evilo-android",
+    ":evilo-desktop",
+    ":evilo-web",
+)

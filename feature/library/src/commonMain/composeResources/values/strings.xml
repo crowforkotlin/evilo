@@ -1,5 +1,0 @@
-<resources>
-    <string name="library_title">Library</string>
-    <string name="library_empty_title">Your library is empty</string>
-    <string name="library_empty_description">Your saved manga will appear here.</string>
-</resources>

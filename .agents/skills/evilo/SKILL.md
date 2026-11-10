@@ -1,6 +1,6 @@
 ---
 name: evilo
-description: Maintain the evilo Kotlin Multiplatform manga reader and its Wasmline source-plugin contracts. Use when changing evilo modules, Compose screens, Gradle configuration, source loading, or Android, desktop, browser, and iOS entry points. This skill does not authorize changes to the upstream Wasmline repository or automatic validation.
+description: Maintain the evilo Kotlin Multiplatform media reader, shared UI, and Wasmline plugin SDK/runtime. Use for evilo module, protocol, Compose, Gradle, catalog, storage, and platform-entrypoint changes. This skill does not authorize upstream Wasmline edits or automatic validation.
 ---
 
 # evilo development
@@ -15,17 +15,25 @@ Read the relevant implementation before editing.
 Use [the module guide](references/module-guide.md) when adding modules, changing
 source sets, moving application entry points, or editing Gradle configuration.
 
-- `core/model` owns serializable manga, chapter, and image-page data.
-- `core/source-api` owns `MangaSource`, `MangaSourceService`, and transport data.
-- `core/source-runtime` owns Wasmline loading and loaded-service lifetimes.
-- `feature/library` owns library UI and state. Add other features as KMP modules
-  when their implementation is requested; do not create empty feature modules.
-- `app/src` owns application composition and desktop, browser, and iOS entry
-  points. `app/android` and `app/ios` are platform launchers, not business modules.
+- `evilo-library` owns portable media models, the synchronous plugin/host protocol,
+  and the legacy manga adapter. It is the single published plugin SDK.
+- `evilo-core` owns network policy, storage, catalogs/install/update state, Wasmline
+  loading, plugin sessions, and reader/application controllers. It does not depend
+  on Compose; sessions expose image bytes, not `ImageBitmap`.
+- `evilo-app` owns all Compose pages, MD3 theme/font/dimensions, image decoding,
+  resources, app composition, and platform persistence bindings. Do not split
+  features into Gradle modules or copy pages into platform launchers.
+- `evilo-android`, `evilo-desktop`,
+  `evilo-web`, and the Xcode-only `evilo-ios` own launchers, not business modules.
+- `evilo-build-logic/base` and `evilo-build-logic/app` own conventions and build tasks.
 
-The current application is a foundation: `App()` supplies an empty library state.
-Do not describe source installation, persistence, downloads, or image reading as
-implemented unless the relevant code exists and the claimed result was observed.
+Keep provider implementations outside evilo and the provider-neutral template.
+Third-party repositories use `evilo-plugin-<provider>` with guest/core modules.
+The SDK is maintained once in evilo, not copied into each provider.
+
+The common app code supplies Browse/More, JSON sources, and image/text viewing;
+library/history/downloads remain unimplemented. Distinguish code/configuration
+from observed builds, installs, signed loading, and runtime behavior.
 
 ## Locate code
 
@@ -38,7 +46,8 @@ unless the user requests one.
 
 ## Keep the plugin contract portable
 
-`MangaSourceService` extends Wasmline's synchronous `WasmlineService`.
+`EviloPluginService`, `EviloHostService`, and legacy `MangaSourceService` extend
+Wasmline's synchronous `WasmlineService`.
 Do not add service properties, suspending methods, overloads, generic methods,
 default parameters, or `vararg` without checking upstream support first.
 
@@ -47,9 +56,10 @@ host network I/O. `MangaSource` may suspend; `MangaSourceService` must not. Pass
 request context explicitly so concurrent host requests do not depend on a
 plugin's mutable last-request state.
 
-Preserve source-qualified `MangaId` values. Review `SOURCE_API_VERSION` whenever
-changing serialized models or service signatures; protocol constants are not
-application release versions and do not belong in `project.properties`.
+Preserve plugin-qualified `MediaId` and legacy source-qualified `MangaId` values.
+Review protocol major/minor and capabilities for serialized/service changes;
+legacy `SOURCE_API_VERSION` is separate. Protocol constants are not application
+release versions and do not belong in `project.properties`.
 
 Use Wasmline's signed-manifest loader rather than accepting arbitrary raw module
 paths from application UI. Preserve error details and close acquired handles on
@@ -65,7 +75,7 @@ be bypassed with Wasm.
 ## Configuration and platform work
 
 Read [the configuration section](../../../README.md#configuration) for value
-ownership. Reuse the version catalog in `build-logic`; do not duplicate dependency
+ownership. Reuse the version catalog in `evilo-build-logic`; do not duplicate dependency
 versions in module scripts. Keep `project.properties` compatible with both Java
 properties and Xcode configuration syntax.
 

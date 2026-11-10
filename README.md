@@ -1,186 +1,178 @@
 # evilo
 
-evilo is a Kotlin Multiplatform manga-reader project targeting Android, iOS,
-desktop JVM, and browsers. Manga sources use Wasmline plugins rather than
-Android APK extensions.
+evilo is a Kotlin Multiplatform media-reader application with one Compose
+Material Design 3 UI for Android, desktop, browsers, and iOS. Providers are signed
+Wasmline plugins loaded from JSON catalogs, not app dependencies or APK extensions.
 
-## Current scope
+## Repositories
 
-This repository contains the application and plugin foundations, not a complete
-reader. `App()` passes an empty `LibraryUiState` to the shared `LibraryScreen`.
-The source modules define manga models, a versioned Wasmline service contract,
-and a loader that adapts the service to asynchronous host calls.
+| Repository | Responsibility |
+| --- | --- |
+| `https://github.com/crowforkotlin/evilo` | Host app, maintained plugin SDK, official JSON catalog |
+| `https://github.com/crowforkotlin/evilo-plugin-templatea` | Provider-neutral multi-module template |
+| `https://github.com/crowforkotlin/evilo-plugin-copymanga` | Independent CopyManga implementation |
 
-Source installation, a concrete HTTP client, trust-key distribution, persistence,
-image rendering, reader navigation, and downloads are not implemented. No source
-plugin, source repository URL, signing key, or proxy service is bundled. The
-application does not invoke the source loader yet.
+The template's local directory remains `../evilo-plugin-template`; its remote
+spelling is preserved. Third-party repositories use `evilo-plugin-<provider>`
+and start from the template. The app and template contain no real provider
+implementation. The CopyManga repository was created independently; sharing
+the template's structure does not make it a formal GitHub fork.
 
 ## Modules
 
-```text
-app/
-  src/commonMain/       Application composition and shared resources
-  src/jvmMain/          Desktop entry point
-  src/webMain/          JS/Wasm browser entry point, HTML, and font
-  src/iosMain/          Compose UIViewController entry point
-  android/             Android application module and resources
-  ios/                 Xcode project and SwiftUI launcher
-core/
-  model/               Serializable manga, chapter, and page models
-  source-api/          Host source interface and Wasmline service contract
-  source-runtime/      Wasmline loading, service calls, and handle ownership
-feature/
-  library/             Shared library UI and state
-build-logic/           Included Gradle convention-plugin build
-.agents/skills/evilo/   Project-local Agent Skill
-```
-
-| Gradle module | Responsibility | Configured targets |
-| --- | --- | --- |
-| `:app` | Compose application, desktop/browser executables, `Evilo` iOS framework | Android library, JVM, iOS ARM64, iOS simulator ARM64, JS, Wasm JS |
-| `:app:android` | Android manifest, activity, signing, and packaging | Android application |
-| `:core:model` | Serializable domain models | All shared application targets plus Wasm WASI |
-| `:core:source-api` | Plugin ABI and asynchronous host interfaces | All shared application targets plus Wasm WASI |
-| `:core:source-runtime` | Wasmline host implementation | All shared application targets |
-| `:feature:library` | Library screen and state | All shared application targets |
-
-`app/ios` is an Xcode project, not a Gradle subproject. AGP 9 requires the Android
-application to remain separate from the KMP Android library. These two launchers
-contain platform startup and packaging, not shared business logic.
+Root project: `evilo-root`. The app has three shared modules with prefixed
+top-level names, explicit settings includes, and an included convention build.
+UI features are packages in one module, not separate Gradle projects.
 
 ```text
-:app:android --> :app --> :feature:library --> :core:model
-                  |
-                  +----> :core:source-runtime --> :core:source-api --> :core:model
-
-app/ios --> Evilo framework produced by :app
+evilo-app/                   All shared Compose UI, theme, fonts, and app composition
+evilo-core/                  Catalogs, HTTP, storage, loading, sessions, and controllers
+evilo-library/               Portable models and the maintained plugin protocol SDK
+evilo-android/               Android launcher, manifest, resources, APK packaging
+evilo-desktop/               Desktop launcher and distribution configuration
+evilo-web/                   JS/Wasm JS viewport launcher and web loading assets
+evilo-ios/                   Xcode/SwiftUI launcher; not a Gradle subproject
+evilo-build-logic/
+  base/                      KMP/Android conventions and shared property lookup
+  app/                       Compose/desktop/web conventions and signing/catalog tasks
+plugin-repository/           Bundled official JSON and catalog schema
+docs/                        Plugin architecture and catalog contract
 ```
 
-Every shared module owns its own `commonMain`, `commonTest`, and any required
-platform source sets. Do not create empty platform implementations for code that
-can stay in `commonMain`. New features belong in their own KMP modules rather
-than growing another catch-all `shared` module.
+Dependencies flow `evilo-app -> evilo-core -> evilo-library`. Only the library is
+published for plugins; it has no Compose, host HTTP, or persistence backend.
+Existing Kotlin packages are preserved: models/protocol use `crow.evilo.model`
+and `crow.evilo.plugin.api`; host logic uses `crow.evilo.plugin.*`,
+`crow.evilo.network.ktor`, `crow.evilo.storage`, and app/reader controller packages.
+UI uses `crow.evilo.app`, `crow.evilo.ui`, and `crow.evilo.feature.*` inside
+`evilo-app`. Platform launchers do not own business UI.
 
-`evilo.multiplatform` declares shared targets and compiler settings.
-`evilo.compose` adds Compose and resource support. Only `:app` declares browser
-executables and an Apple framework; ordinary libraries do not produce apps.
-The model and source API also declare `wasmWasi` so Kotlin source plugins can
-consume the same contract without depending on Compose or the host loader.
+`evilo-app` supplies `App()` for every platform. Android calls it from
+`MainActivity`, desktop from `MainKt`, web through `WebApp()`, and iOS through
+`MainViewController`. `evilo-app` owns colors, typography, Noto Sans SC, rounded
+shapes, and width limits. Compact windows use Browse/More with a centered content
+selector; at 840 dp the same navigation moves to a rail. Page content is capped
+at 1320 dp and reading at 900 dp. Cards, filter chips, source/install counts, empty
+states, settings, and safety sections adapt without platform-specific page copies.
+
+Shared modules retain Android, JVM, iOS ARM64/simulator ARM64, JS, and Wasm JS.
+Only `evilo-library` also declares Wasm WASI for guests.
+`evilo-desktop` and `evilo-web` own executables; `evilo-app` exports the static
+`Evilo` Apple framework. Apple builds require macOS/Xcode, not target removal.
+
+## Current behavior and limits
+
+Browse lists JSON sources and supports search plus All/Installed/Officially
+reviewed filters. The manga/novel/anime/film selector filters both available and
+installed plugins. More contains source management, NSFW preference, installed
+plugins, and safety information. NSFW is hidden by default.
+
+Users do not enter Ed25519 keys, key IDs, or individual WLM URLs. Installations
+require a compatible release, matching signed source provenance, the app authority
+signature, and explicit permission approval. Official review does not prove safety.
+Other authors may maintain JSON catalogs, but cannot supply trusted keys or grant
+themselves official certification.
+
+Image/text reading code is shared. Video URLs open externally after approval;
+custom playback headers are unsupported. Library/history, saved reading progress,
+downloads, cloud sync, login, and in-app video are not implemented.
+
+The bundled `plugin-repository/official.json` remains empty until actual reviewed
+signed packages and matching source archives are published. The default refresh
+URL is `https://raw.githubusercontent.com/crowforkotlin/evilo/main/plugin-repository/official.json`.
+Local edits do not publish that URL or make a license-only source commit a valid
+plugin release. SDK publication is configured, not established remotely.
 
 ## Configuration
 
 | File | Owned values |
 | --- | --- |
-| `gradle/libs.versions.toml` | Kotlin, AGP, Compose, Wasmline, JDK target, SDK levels, and library/plugin coordinates |
-| `project.properties` | Application identity, release version/code, and iOS deployment target |
-| `gradle.properties` | Gradle/Kotlin execution settings and the settings-plugin version |
-| `gradle/wrapper/gradle-wrapper.properties` | Gradle distribution and checksum |
-| `gradle/gradle-daemon-jvm.properties` | Generated Gradle daemon JVM criteria |
-| `app/ios/Configuration/Config.xcconfig` | Apple signing team and mappings from shared application properties |
+| `gradle/libs.versions.toml` | Dependency/compiler versions, SDK levels, JDK, SDK version |
+| `project.properties` | App identity, release version/code, iOS deployment target |
+| `gradle.properties` | Gradle/Kotlin execution configuration |
+| `gradle/wrapper/gradle-wrapper.properties` | Gradle distribution/checksum |
+| `evilo-ios/Configuration/Config.xcconfig` | Apple signing and shared property mappings |
+| `plugin-repository/official.json` | Canonical bundled official catalog |
 
-`project.properties` uses plain `KEY=value` assignments accepted by both Java
-properties and Xcode configuration files. Gradle reads it through
-`eviloProperty()`; Xcode includes it directly. Keep release versions in
-three-component form, such as `1.0.0`, for desktop packaging. Localized screen
-text remains in Compose resources; the browser document title is in `index.html`.
+`project.properties` remains plain Java/Xcode-compatible `KEY=value` assignments.
+Dependency versions are not duplicated in module scripts. `wasmline.localPath`
+is an optional composite, never a committed absolute checkout path. It may
+execute upstream tasks and requires that checkout's toolchain/artifacts.
 
-The Kotlin baseline follows the local Wasmline reference's compiler-plugin
-version. Change Kotlin, its serialization/Compose plugins, and the Wasmline
-compiler plugin as a compatible set. Declaring dependencies does not establish
-that a particular publication or native artifact is available; resolution and
-compilation still need to be run explicitly.
+## SDK, authority, and storage
 
-Published Wasmline coordinates are the default. To use a local checkout, provide
-`wasmline.localPath` as a Gradle property; no developer-specific path is committed.
-For example, a manually requested compile can use:
+The SDK coordinate is `io.github.crowforkotlin.evilo:evilo-library:1.0.0`.
+Templates consume this library rather than copying models/protocols. Until
+publication, use `-Pevilo.sdkPath=../evilo`. There is no third SDK repository;
+changes are maintained once in `evilo-library`. Consolidation preserves the
+serialized protocol and service packages; it does not change the bridge ABI.
 
-```sh
-./gradlew -Pwasmline.localPath=/path/to/wasmline :core:source-runtime:compileKotlinJvm
-```
+`evilo-core` owns plugin connections and reader state without depending on Compose.
+Sessions return permission-checked image bytes; `evilo-app` performs bounded
+bitmap decoding. The app supplies its generated public signing authority to
+`PluginSessionFactory`; neither the core nor catalogs choose replacement keys.
 
-The optional composite supplies both Gradle plugins and library substitutions.
-It may execute tasks in the referenced checkout and requires that checkout's
-toolchain and native artifacts when building the application.
+`EviloPluginService` uses synchronous fixed JSON envelopes; `EviloHostService`
+provides capabilities and private key/value storage. Required major/minor,
+capabilities, and app version bounds are checked before loading. HTTP request
+construction/parsing is separate from async host transport. Continuations carry
+explicit context; service signatures do not change for optional fields. Legacy
+manga API 2 remains an SDK adapter, not an installable API-2-only package format.
 
-## Wasmline sources
+`:evilo-app:generatePluginSigningKeys` creates/preserves one external Ed25519
+release-family authority, normally under `~/.evilo/signing`. App compilation
+uses it and embeds only the public key. Keys are never overwritten; incomplete
+or mismatched authority files require restoration. Templates check and reuse
+this authority, not their own or old preview keys. A shared release family must
+preserve the same authority across app updates, not generate one per phone.
 
-`MangaSourceService` is the plugin-facing binary interface (ABI).
-`MangaSource` is the asynchronous application-facing interface.
+Only the authority operator signs releases. Independent authors do not receive
+private keys. Use the same `evilo.signingKeyDirectory` override across app/provider
+builds. Back up keys outside repositories; never print, commit, archive, or upload
+private material. Custom catalogs cannot change the trust authority.
 
-```text
-MangaSource.search(query, page)
-  -> MangaSourceService.searchRequest(query, page)
-  -> SourceHttpClient.execute(metadata, request)
-  -> MangaSourceService.parseSearch(query, page, response)
-  -> MangaSearchResult
-```
+Plugin storage is persistent and scoped by signed ID: default 1 MiB total,
+256 entries, 64 KiB/value, and 128-character keys. It is not encrypted credential
+storage. Android/JVM/iOS use private files; browser localStorage has additional
+quota/availability limits. No cross-device/process synchronization is implemented.
 
-Details, chapters, and pages follow the same request/response pattern. Wasmline
-service methods are synchronous; they must not declare `suspend`, overloads,
-properties, generic methods, default arguments, or `vararg`. Network I/O belongs
-to the suspending host HTTP client, not a synchronous browser import. Service
-methods must use their explicit request context rather than mutable per-request
-global state because HTTP operations can overlap.
-
-`WasmlineSourceLoader` accepts signed local/remote manifest sources, delegates
-package verification to Wasmline, links `MangaSourceService`, and rejects an
-unsupported `SOURCE_API_VERSION`. It closes the loaded handle if linking or
-metadata negotiation fails. `WasmlineMangaSource` serializes service calls and
-close operations; calls after close fail, including parsing an HTTP response
-that arrives after close. The caller still owns cancellation of in-flight HTTP.
-
-`MangaId` combines source ID and source-local ID. Search page numbers start at
-one; image page indexes start at zero. Breaking model or service changes require
-an explicit API-version decision. The initial protocol supports one HTTP exchange
-per operation; multi-step authentication or scraping needs a separate design.
-
-The application selects the Pulley native engine for Android, desktop, and iOS.
-Browsers use Wasmline's browser implementation and do not depend on native engine
-artifacts. Plugin packages must provide artifacts suitable for each host.
-
-Before connecting the loader to UI, supply trusted keys, loader networking/cache
-options, and a `SourceHttpClient` with explicit domain, redirect, timeout, response
-size, and credential rules. Plugin-requested URLs and headers are untrusted.
-Wasm isolation does not grant HTTP permission. Browser CORS rules still apply;
-Wasmline cannot make arbitrary manga sites browser-accessible. Any proxy must be
-an explicit, configured product decision, not a built-in endpoint.
+See `docs/plugin-architecture.md` for network policies and remaining runtime
+limits, and `docs/plugin-catalog.md` for metadata, actual-source requirements,
+compatible versions, and mandatory updates. The host checks signed revision/hash
+consistency, not archive contents or reproducible builds. Current upstream does
+not expose guest execution-fuel or linear-memory limits.
 
 ## Manual commands
 
-Commands below are instructions, not recorded results. Agents must not run tests,
-Gradle tasks, builds, formatters, servers, or validators without an explicit user
-request for that operation.
+These are instructions, not execution records. Builds, tests, packaging, servers,
+installation, screenshots, commits, and publication require their own explicit
+requests. Authorizing an APK build/install does not authorize other targets or tests.
 
-Use the JDK specified by the version catalog and Gradle daemon criteria. Android
-requires the configured SDK and a local SDK installation. iOS requires macOS and
-Xcode; set `TEAM_ID` in the Xcode configuration for device signing. Browser tests
-require a browser supported by the Kotlin test runner.
-
-| Operation | Command from the repository root |
+| Operation | Command from this repository |
 | --- | --- |
-| Domain tests on JVM | `./gradlew :core:model:jvmTest` |
-| Domain tests on Android host | `./gradlew :core:model:testAndroidHostTest` |
-| Domain tests on Web | `./gradlew :core:model:jsBrowserTest :core:model:wasmJsBrowserTest` |
-| Domain tests on iOS simulator | `./gradlew :core:model:iosSimulatorArm64Test` |
-| Desktop compilation | `./gradlew :app:compileKotlinJvm` |
-| Desktop application | `./gradlew :app:run` |
-| Android debug APK | `./gradlew :app:android:assembleDebug` |
-| Browser Wasm distribution | `./gradlew :app:wasmJsBrowserDistribution` |
-| Browser JS distribution | `./gradlew :app:jsBrowserDistribution` |
-| Browser development server | `./gradlew :app:wasmJsBrowserDevelopmentRun` or `./gradlew :app:jsBrowserDevelopmentRun` |
-| iOS simulator framework | `./gradlew :app:linkDebugFrameworkIosSimulatorArm64` on macOS |
+| Android debug APK | `./gradlew :evilo-android:assembleDebug` |
+| Preserve signing authority | `./gradlew :evilo-app:generatePluginSigningKeys` |
+| Desktop compilation | `./gradlew :evilo-desktop:compileKotlin` |
+| Desktop app | `./gradlew :evilo-desktop:run` |
+| Browser Wasm distribution | `./gradlew :evilo-web:wasmJsBrowserDistribution` |
+| Browser JS distribution | `./gradlew :evilo-web:jsBrowserDistribution` |
+| iOS simulator framework | `./gradlew :evilo-app:linkDebugFrameworkIosSimulatorArm64` on macOS |
+| Protocol/model tests | `./gradlew :evilo-library:jvmTest` |
+| Catalog/storage/HTTP/runtime/controller tests | `./gradlew :evilo-core:jvmTest` |
+| Image decoder tests | `./gradlew :evilo-app:jvmTest` |
 
-For the iOS application, open `app/ios/iosApp.xcodeproj`. Its build phase invokes
-`:app:embedAndSignAppleFrameworkForXcode` with Xcode's platform and signing settings.
+Android needs the configured SDK and JDK. iOS uses
+`evilo-ios/iosApp.xcodeproj`; its build phase invokes
+`:evilo-app:embedAndSignAppleFrameworkForXcode`. Browsers obey CORS/mixed-content
+restrictions; no server or proxy is started automatically.
 
-## Project skill
+The old `:app:android`, `:sources:copymanga`, and preview properties are obsolete.
+Use the separate provider README for signing/export. Do not publish its old
+ignored binaries, assign invented source commits/URLs, or claim official review
+before the actual release and source have been reviewed/published.
 
-Project-specific agent instructions are maintained only in `.agents/skills/`.
-Use [`.agents/skills/evilo/SKILL.md`](.agents/skills/evilo/SKILL.md) and its referenced
-guides. The skill contains the required `name` and `description` frontmatter from the
-[Agent Skills specification](https://agentskills.io/specification).
+## Project instructions
 
-If `skills-ref` is installed, the skill can be validated manually with
-`skills-ref validate .agents/skills/evilo`. This is separate from application
-builds and tests and also requires explicit authorization before an agent runs it.
+Project rules remain in `.agents/skills/evilo/` and its module guide. Comments and
+repository docs are English; user replies use the user's language. Report source
+changes separately from observed builds, installs, runtime behavior, and tests.

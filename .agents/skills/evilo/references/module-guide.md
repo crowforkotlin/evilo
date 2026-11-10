@@ -1,96 +1,127 @@
 # Module and configuration guide
 
-Paths in this guide are relative to the repository root.
+Paths are relative to the evilo repository root. Follow the prefixed top-level
+module naming used by Wasmline, with explicit Gradle settings includes.
 
-## Dependency direction
+## Ownership and dependencies
 
-| Module | Project dependencies | Convention |
+| Module | Direct project dependencies | Convention |
 | --- | --- | --- |
-| `:core:model` | None | `evilo.multiplatform` |
-| `:core:source-api` | `:core:model` | `evilo.multiplatform` |
-| `:core:source-runtime` | `:core:source-api` | `evilo.multiplatform` |
-| `:feature:library` | `:core:model` | `evilo.compose` |
-| `:app` | `:feature:library`, `:core:source-runtime` | `evilo.compose` |
-| `:app:android` | `:app` | `evilo.android.application` |
+| `evilo-library` | None | `evilo.multiplatform` |
+| `evilo-core` | `evilo-library` | `evilo.multiplatform` |
+| `evilo-app` | `evilo-core` | `evilo.compose` |
+| `evilo-android` | Shared app | `evilo.android.application` |
+| `evilo-desktop` | Shared app | `evilo.desktop.application` |
+| `evilo-web` | Shared app | `evilo.web.application` |
 
-Keep core modules independent of features and application entry points. Features
-should depend on the contracts they use; construct runtime implementations in
-the application rather than embedding native engine selection in feature UI.
-The current application declares its runtime dependency but does not load sources.
+`evilo-ios` is an Xcode launcher, not a Gradle project. Dependencies flow
+`evilo-app -> evilo-core -> evilo-library`, never in reverse. These are the only
+shared application modules; features are packages, not Gradle projects.
+Platform launchers call the same `App()`; they do not copy page implementations.
+`evilo-app` owns all Compose screens, MD3 theme/font/layout dimensions, generated
+resources, and image decoding. Browse/More, source/permission sheets, the reader,
+and the existing unconnected library screen all live there. `evilo-core` owns
+catalogs, HTTP, persistence, signed loading, sessions, and reader/app controllers.
+Sessions return bytes so host logic never depends on Compose. The library-screen
+foundation is not a working bookshelf tab.
 
-## Shared targets
+Preserve existing Kotlin packages during consolidation: `crow.evilo.model`, `crow.evilo.plugin.api`,
+`crow.evilo.plugin.runtime`, `crow.evilo.plugin.catalog`, `crow.evilo.network.ktor`,
+`crow.evilo.storage`, `crow.evilo.ui`, `crow.evilo.feature.*`, and platform/app
+packages. Packages need not match module names; reader/app controllers live in
+`evilo-core` while Compose pages live in `evilo-app`. Keep source paths consistent
+with packages, including tests. The library contains only models/protocol code,
+not host HTTP, Compose, catalog state, or filesystem backends.
 
-`build-logic/src/main/kotlin/evilo.multiplatform.gradle.kts` configures:
+No real provider belongs in evilo or `../evilo-plugin-template`. The template
+contains `evilo-plugin-core`, `evilo-plugin`, and an included
+`evilo-plugin-build-logic` with base/plugin convention modules. Third-party repos
+use `evilo-plugin-<provider>` and a matching core module. CopyManga lives only in
+`../evilo-plugin-copymanga`. Provider cores do not depend on guest-generated fields;
+guest entrypoints pass release identity/descriptor into portable implementation.
 
-- Android KMP library, SDK levels, namespace, and host tests.
-- JVM desktop and a shared JDK/bytecode target.
-- iOS device ARM64 and simulator ARM64, even on non-Apple development hosts.
-- Browser JS and Wasm JS, with the default source-set hierarchy.
-- The common Kotlin test dependency.
+The template remote is the user-supplied `evilo-plugin-templatea`; its local path
+remains `evilo-plugin-template`. Preserve that distinction. Source changes do not
+create GitHub fork relationships, commits, or hosted releases automatically.
 
-Shared business code belongs in the owning module's `src/commonMain/kotlin`.
-Use `androidMain`, `jvmMain`, `iosMain`, `webMain`, `jsMain`, or `wasmJsMain` only
-for actual platform dependencies. There is no requirement to create empty
-`expect`/`actual` implementations for every platform.
+## Targets and conventions
 
-`core/model` and `core/source-api` add a Wasm WASI library target for Kotlin source
-plugins. Keep host APIs out of their common code. Do not add Wasm WASI to Compose
-features or the Wasmline host runtime.
+`evilo-build-logic/base` owns KMP/Android conventions and property lookup;
+`evilo-build-logic/app` owns Compose/desktop/web conventions and signing/catalog
+tasks. Kotlin DSL accessor generation applies base conventions without consumer
+catalogs, so target/dependency configuration waits for the actual `libs` catalog.
+Do not duplicate dependency versions in scripts.
 
-Only `app/build.gradle.kts` configures browser executables, desktop distributions,
-and the static `Evilo` framework. Android application packaging stays in
-`app/android/build.gradle.kts` because AGP 9 separates applications from KMP
-Android libraries.
+Shared modules retain Android KMP library/host-test, JVM/JDK, iOS device/simulator
+ARM64, JS, and Wasm JS targets with the default hierarchy. Only `evilo-library` adds
+Wasm WASI. Providers declare JVM/WASI portable libraries and a WASI guest binary.
+Keep host HTTP, Compose, storage backends, and native runtime engines out of guests.
 
-## Adding a module
+`evilo-app` exports the static `Evilo` Apple framework; it is not a desktop/web
+executable. `evilo-desktop` owns desktop startup/distributions. `evilo-web` owns
+browser viewport startup, JS/Wasm executables, and HTML/CSS loading assets.
+Android packaging is in `evilo-android` because AGP separates applications from
+KMP Android libraries. Apple targets stay declared on non-macOS hosts.
 
-Register a requested module explicitly in `settings.gradle.kts`; directories are
-not auto-included. Use type-safe `projects` accessors for project dependencies.
+Shared source belongs in `commonMain`; platform code implements real dependencies
+only. Persistence uses Android private files, JVM app data, iOS Application
+Support, or browser localStorage. Storage locks are monitor/NSRecursiveLock or
+single-thread web execution; no cross-tab/process/device coordination is provided.
 
-For a shared logic module, apply `evilo.multiplatform`. For Compose UI, apply
-`evilo.compose`. Add only the dependencies the module uses. Use `api` when a
-dependency's types are part of a public contract and `implementation` otherwise.
+## Build configuration
 
-Serialized classes need `libs.plugins.kotlinSerialization`. Modules declaring
-Wasmline service contracts or calling typed `link`/`bind` need
-`libs.plugins.wasmline`; without the compiler plugin, typed entry points are not
-ordinary executable implementations. The application also applies that plugin
-to select native JVM engine variants by operating system and architecture.
+- Dependencies/compiler/SDK/JDK versions: `gradle/libs.versions.toml`.
+- App identity/version/iOS deployment: Java/Xcode-compatible `project.properties`.
+- Execution settings: `gradle.properties`, wrapper, and daemon files.
+- Protocol major/minor/capabilities: `evilo-library`, not app release properties.
+- Catalog parser/official URL: `evilo-core`; bundled JSON/schema: `plugin-repository`.
+- Authority: `:evilo-app:generatePluginSigningKeys` and external `evilo.signingKeyDirectory`.
+- Runtime permissions: reviewed per-release origins/methods/headers/storage and HTTP consent.
 
-Place Compose strings and other shared UI resources in the feature that owns
-them. Set an explicit Compose resource package so moving a Gradle module does
-not silently change imports.
+The SDK publication is `io.github.crowforkotlin.evilo:evilo-library`, versioned once in the catalog.
+A configured publication is not proof of availability. Templates may explicitly
+substitute `-Pevilo.sdkPath=../evilo`; never copy models/service interfaces.
 
-## Value ownership
+Register modules explicitly and use type-safe `projects.evilo*` accessors. Apply
+serialization for serialized models, and the Wasmline compiler plugin where typed
+services are bound/linked. Public contracts use `api`; hidden dependencies use
+`implementation`. The official catalog is generated from one root JSON file;
+font/theme resources live in `evilo-app`, not duplicate platform resource trees.
+All UI resources use `crow.evilo.app.resources`. Both app configuration and the
+bundled catalog generation tasks are registered in `evilo-app`.
+The app injects its generated public authority into `PluginSessionFactory` in
+`evilo-core`; neither catalogs nor plugins can supply app trust keys.
 
-- Dependency and compiler versions: `gradle/libs.versions.toml`, also imported by
-  `build-logic/settings.gradle.kts`.
-- Application identity/version values: `project.properties`, read by the
-  `buildlogic.eviloProperty()` helper and included by Xcode's `Config.xcconfig`.
-- Build execution settings: `gradle.properties`.
-- Wrapper distribution/checksum and daemon JVM criteria: their existing files in
-  `gradle/`; do not edit generated criteria as if they were ordinary source.
-- Source protocol version: `SOURCE_API_VERSION` in `core/source-api`, changed
-  only with a compatibility decision about the service and serialized data.
-- Source HTTP policy, trust keys, cache paths, and URLs: explicit runtime inputs,
-  not committed machine-specific values or sample secrets.
+Xcode's repository root is `$SRCROOT/..`; its configuration includes
+`../../project.properties`. Framework build phase, Gradle task, Swift import,
+shared properties, and path changes must be updated together. Package/app ID or
+framework renames are separate from directory changes. Preserve installed app
+identity and data during a requested update; do not uninstall or clear data to
+solve a signing conflict without explicit approval.
 
-Changing application identity properties does not rename Kotlin/Swift packages,
-the `Evilo` Swift import, or the stable `app.js` browser bundle. A package or
-framework rename requires updating those source references as a separate change.
+## Protocol and trust
 
-For iOS path changes, update the Xcode build phase's repository-root directory,
-`:app:embedAndSignAppleFrameworkForXcode`, the `Evilo` Swift import, and the
-relative `project.properties` include together. Do not move signing values into
-shared Kotlin source.
+Use fixed synchronous JSON-envelope WasmlineService signatures. No suspending
+methods, overloads, properties, generics, default args, varargs, or service
+parameters without checking read-only upstream support. Preserve plugin-qualified
+IDs and explicit continuations. Legacy manga API 2 is an adapter, not the generic
+app's installable protocol. Optional fields do not change bridge signatures.
 
-For version changes, account for the Wasmline compiler plugin's Kotlin version
-and native artifacts. An optional local composite can require upstream native
-build outputs; do not silently run those builds or change the upstream checkout.
+Keep one Ed25519 authority across an app release family and its updates. The app
+embeds public material only; templates cannot generate replacement keys. Private
+keys stay outside repos, resources, source ZIPs, and catalogs. Users/catalogs cannot
+supply trust keys. Review/signing does not prove network or execution safety.
 
-## Validation boundary
+Use signed remote manifests and explicit package/network policies. Do not accept
+raw modules through UI, copy sample trust keys, grant wildcard origins, or claim
+browser CORS is bypassed. The upstream Wasmline checkout stays read-only; composite
+builds are opt-in and may need its artifacts/toolchain.
 
-Read-only source and Git inspection is allowed. Gradle invocation, compilation,
-tests, formatters, and skill validators require explicit authorization. Provide
-the relevant commands from the root README; do not execute them merely because
-this guide mentions them.
+## Execution boundary
+
+Read source and Git state before changes. Preserve unrelated edits. No branches,
+commits, or pushes unless requested. Tests, builds, packaging, formatters,
+validators, servers, device commands, installation, and screenshots need a specific
+request. APK build/install authorization covers that APK and installation only,
+not desktop/web/iOS builds, unit tests, app launch, or screenshots. Select manual
+commands from README and report observed results separately from source changes.

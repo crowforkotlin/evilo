@@ -1,0 +1,75 @@
+:root {
+    color-scheme: light dark;
+    --background: #f6f8f2;
+    --surface: #f0f4ec;
+    --foreground: #1a211c;
+    --primary: #285b48;
+    --accent: #c7ead7;
+}
+
+html, body {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    background: var(--background);
+    color: var(--foreground);
+}
+
+canvas { display: block; }
+
+.startup {
+    position: fixed;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    background: radial-gradient(ellipse at 15% 20%, var(--accent), transparent 65%);
+    font-family: "Noto Sans SC", "Noto Sans", sans-serif;
+}
+
+.startup-card {
+    display: grid;
+    justify-items: center;
+    gap: 24px;
+    padding: 48px 36px;
+    border-radius: 36px;
+    background: var(--surface);
+    text-align: center;
+}
+
+.startup-mark {
+    color: var(--primary);
+    font-size: 40px;
+    letter-spacing: -0.04em;
+    font-weight: 600;
+}
+
+.startup-progress {
+    width: 32px;
+    height: 32px;
+    border: 3px solid var(--accent);
+    border-top-color: var(--primary);
+    border-radius: 50%;
+    animation: progress 1s linear infinite;
+}
+
+.startup-card p { margin: 0; }
+body:has(canvas) .startup { display: none; }
+
+@keyframes progress { to { transform: rotate(360deg); } }
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --background: #111813;
+        --surface: #1d261f;
+        --foreground: #e1e8dd;
+        --primary: #9ed4b7;
+        --accent: #154d39;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .startup-progress { animation: none; }
+}
