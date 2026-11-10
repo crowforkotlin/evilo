@@ -17,6 +17,30 @@ matching source archives, and source snapshots have been published. Other author
 may host their own JSON file and subscribe to it in Browse's source-management
 action. Adding a catalog never adds a signing key.
 
+## Install from a published catalog
+
+`official.json` is a list of plugin releases, not a plugin binary. With
+`"plugins": []`, it offers no official plugin to install. Publishing a source
+repository alone does not provide an installable catalog or signed package.
+
+1. In Browse, open Plugin Sources with the App Bar's `+` action.
+2. Paste a publisher's direct JSON catalog URL and subscribe. Do not enter a
+   repository homepage, source archive, individual WLM/Wasm URL, or signing key.
+3. Choose the plugin's content type. Enable the NSFW preference in More only if
+   you want to show entries with that classification.
+4. Open the plugin, choose a compatible release, review its source and requested
+   permissions, and confirm installation. Use Open to access an installed plugin.
+
+Each listed release must already have a reachable signed manifest and all of its
+referenced artifacts. The signature must match the application's preserved
+authority; neither a custom catalog nor user input can replace it. Source,
+archive, and icon URLs must describe the actual release. Downloads must be served
+directly, without redirects, under the approved URL policy.
+
+The JSON example in this document is illustrative. Its URLs do not provide a
+working installation. Keep an official list empty rather than inserting guessed
+URLs or claiming that an unpublished package can be installed.
+
 ## Catalog fields
 
 | Field | Meaning |

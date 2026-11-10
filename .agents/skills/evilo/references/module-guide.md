@@ -36,9 +36,11 @@ not host HTTP, Compose, catalog state, or filesystem backends.
 No real provider belongs in evilo or `../evilo-plugin-template`. The template
 contains `evilo-plugin-core`, `evilo-plugin`, and an included
 `evilo-plugin-build-logic` with base/plugin convention modules. Third-party repos
-use `evilo-plugin-<provider>` and a matching core module. CopyManga lives only in
-`../evilo-plugin-copymanga`. Provider cores do not depend on guest-generated fields;
-guest entrypoints pass release identity/descriptor into portable implementation.
+use `evilo-plugin-<provider>` and a matching core module. Keep host code, resources,
+build configuration, and documentation provider-neutral; do not include specific
+provider examples or repository links. Provider cores do not depend on
+guest-generated fields; guest entrypoints pass release identity/descriptor into
+portable implementation.
 
 The template remote is the user-supplied `evilo-plugin-templatea`; its local path
 remains `evilo-plugin-template`. Preserve that distinction. Source changes do not

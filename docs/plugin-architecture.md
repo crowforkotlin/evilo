@@ -4,9 +4,11 @@
 
 `evilo` owns the application, the protocol SDK, catalog format, signing authority,
 network approvals, persistence, and Wasmline loading. It contains no source-site
-implementation or guest binary. `evilo-plugin-template` is an independent Gradle
-build; its CopyManga example was moved out of this repository, including existing
-local build outputs. A plugin is never a project dependency of the application.
+implementation or guest binary. Source-site implementations and release files
+belong in independent `evilo-plugin-<provider>` repositories, not host code,
+resources, build configuration, or documentation. `evilo-plugin-template` is an
+independent, provider-neutral Gradle build. A plugin is never a project dependency
+of the application.
 
 The SDK is maintained once in `evilo-library`, configured for publication as
 `io.github.crowforkotlin.evilo:evilo-library`. Plugins pin an SDK release. An explicit

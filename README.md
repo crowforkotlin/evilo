@@ -10,13 +10,13 @@ Wasmline plugins loaded from JSON catalogs, not app dependencies or APK extensio
 | --- | --- |
 | `https://github.com/crowforkotlin/evilo` | Host app, maintained plugin SDK, official JSON catalog |
 | `https://github.com/crowforkotlin/evilo-plugin-templatea` | Provider-neutral multi-module template |
-| `https://github.com/crowforkotlin/evilo-plugin-copymanga` | Independent CopyManga implementation |
 
 The template's local directory remains `../evilo-plugin-template`; its remote
 spelling is preserved. Third-party repositories use `evilo-plugin-<provider>`
 and start from the template. The app and template contain no real provider
-implementation. The CopyManga repository was created independently; sharing
-the template's structure does not make it a formal GitHub fork.
+implementation. Keep host code, build configuration, resources, and documentation
+provider-neutral; third-party implementations and their release files stay in
+independent repositories.
 
 ## Modules
 
@@ -80,8 +80,38 @@ downloads, cloud sync, login, and in-app video are not implemented.
 The bundled `plugin-repository/official.json` remains empty until actual reviewed
 signed packages and matching source archives are published. The default refresh
 URL is `https://raw.githubusercontent.com/crowforkotlin/evilo/main/plugin-repository/official.json`.
-Local edits do not publish that URL or make a license-only source commit a valid
-plugin release. SDK publication is configured, not established remotely.
+Pushing application or plugin source code does not publish an installable plugin
+package. SDK publication is configured, not established remotely.
+
+## Install a plugin
+
+The app installs releases from a published JSON catalog. A source repository
+homepage, individual `.wlm` or `.wasm` file, and signing key are not subscription
+addresses.
+
+1. Open Browse and tap the App Bar's `+` action to open Plugin Sources.
+2. Enter the publisher's direct JSON catalog URL and tap Subscribe. Prefer HTTPS;
+   plain HTTP requires explicit cleartext consent.
+3. Select a content type supported by the plugin. NSFW entries remain hidden
+   unless their preference is enabled in More.
+4. Open a plugin entry, select a compatible available version, and tap Install.
+   Review its source and requested permissions, then tap Approve and Install.
+5. Use Open to enter an installed plugin. No WLM URL, key ID, or Ed25519 key is
+   entered by the user.
+
+The official source is already subscribed. An empty `official.json` means there
+are no official releases to install; refreshing an empty list does not create a
+plugin. The illustrative URLs in the catalog documentation are not installable
+releases.
+
+A publisher must first export a package signed by the authority embedded in the
+app, its actual source archive, icon, and `plugins.json`. Host `manifest.wlm`, its
+content-addressed `artifacts/` directory, the source archive, icon, and catalog
+at directly accessible HTTP(S) URLs. The app rejects download redirects. Keep
+these files outside the host repository; only reviewed catalog metadata belongs
+in its official list. See the independent template's README for release export,
+and `docs/plugin-catalog.md` for the catalog contract. Without a published catalog
+and matching signed package, there is no usable installation address to enter.
 
 ## Configuration
 
@@ -166,10 +196,10 @@ Android needs the configured SDK and JDK. iOS uses
 `:evilo-app:embedAndSignAppleFrameworkForXcode`. Browsers obey CORS/mixed-content
 restrictions; no server or proxy is started automatically.
 
-The old `:app:android`, `:sources:copymanga`, and preview properties are obsolete.
-Use the separate provider README for signing/export. Do not publish its old
-ignored binaries, assign invented source commits/URLs, or claim official review
-before the actual release and source have been reviewed/published.
+The old `:app:android` task and preview signing properties are obsolete. Use the
+independent plugin repository's README for signing/export. Do not publish stale
+binaries, assign invented source commits/URLs, or claim official review before
+the actual release and source have been reviewed/published.
 
 ## Project instructions
 
