@@ -1,11 +1,27 @@
+@font-face {
+    font-family: "ChillRoundM";
+    src: url("composeResources/crow.evilo.app.resources/font/ChillRoundMSemiBold.ttf") format("truetype");
+    font-style: normal;
+    font-weight: 600;
+    font-display: swap;
+}
+
 :root {
     color-scheme: light dark;
-    --background: #f6f8f2;
-    --surface: #f0f4ec;
-    --foreground: #1a211c;
-    --primary: #285b48;
-    --accent: #c7ead7;
+    --background: #f7faf9;
+    --surface: #ffffff;
+    --surface-low: #f0f5f3;
+    --foreground: #192522;
+    --muted: #51625c;
+    --primary: #006a6b;
+    --accent: #b5f0ec;
+    --outline: #d6dfd9;
+    font-family: "ChillRoundM", sans-serif;
+    font-weight: 600;
+    font-synthesis: none;
 }
+
+* { box-sizing: border-box; }
 
 html, body {
     width: 100%;
@@ -24,26 +40,26 @@ canvas { display: block; }
     inset: 0;
     display: grid;
     place-items: center;
-    padding: 24px;
-    background: radial-gradient(ellipse at 15% 20%, var(--accent), transparent 65%);
-    font-family: "Noto Sans SC", "Noto Sans", sans-serif;
+    padding: 16px;
+    background: linear-gradient(var(--surface-low), var(--background));
 }
 
 .startup-card {
     display: grid;
     justify-items: center;
-    gap: 24px;
-    padding: 48px 36px;
-    border-radius: 36px;
+    width: min(100%, 360px);
+    gap: 16px;
+    padding: 32px 24px;
+    border: 1px solid var(--outline);
+    border-radius: 24px;
     background: var(--surface);
     text-align: center;
 }
 
 .startup-mark {
     color: var(--primary);
-    font-size: 40px;
-    letter-spacing: -0.04em;
-    font-weight: 600;
+    font-size: 28px;
+    line-height: 36px;
 }
 
 .startup-progress {
@@ -55,18 +71,26 @@ canvas { display: block; }
     animation: progress 1s linear infinite;
 }
 
-.startup-card p { margin: 0; }
+.startup-card p, .startup-card noscript {
+    margin: 0;
+    color: var(--muted);
+    font-size: 14px;
+    line-height: 22px;
+}
 body:has(canvas) .startup { display: none; }
 
 @keyframes progress { to { transform: rotate(360deg); } }
 
 @media (prefers-color-scheme: dark) {
     :root {
-        --background: #111813;
-        --surface: #1d261f;
-        --foreground: #e1e8dd;
-        --primary: #9ed4b7;
-        --accent: #154d39;
+        --background: #101716;
+        --surface: #131b19;
+        --surface-low: #19231f;
+        --foreground: #e1ece7;
+        --muted: #b6c8bf;
+        --primary: #78d6cf;
+        --accent: #00514e;
+        --outline: #344a40;
     }
 }
 

@@ -1,13 +1,9 @@
 package crow.evilo.app
 
-import androidx.compose.ui.graphics.ImageBitmap
-import org.jetbrains.compose.resources.decodeToImageBitmap
-
-internal fun decodePluginImage(bytes: ByteArray, maxDimension: Int = 16_384, maxPixels: Long = 32L * 1024 * 1024): ImageBitmap {
+internal fun validatePluginImage(bytes: ByteArray, maxDimension: Int = 16_384, maxPixels: Long = 32L * 1024 * 1024) {
     // Inspect dimensions before allocating pixels; a small compressed file can describe an enormous image.
     val (width, height) = pluginImageDimensions(bytes)
     requirePluginDimensions(width, height, maxDimension, maxPixels)
-    return bytes.decodeToImageBitmap().also { requirePluginDimensions(it.width, it.height, maxDimension, maxPixels) }
 }
 
 internal fun pluginImageDimensions(bytes: ByteArray): Pair<Int, Int> {
@@ -51,7 +47,7 @@ internal fun pluginImageDimensions(bytes: ByteArray): Pair<Int, Int> {
     error("The reader supports JPEG, PNG, and WebP images only.")
 }
 
-private fun requirePluginDimensions(width: Int, height: Int, maxDimension: Int, maxPixels: Long) {
+internal fun requirePluginDimensions(width: Int, height: Int, maxDimension: Int, maxPixels: Long) {
     check(width in 1..maxDimension && height in 1..maxDimension && width.toLong() * height <= maxPixels) {
         "Image exceeds its limit: $maxDimension pixels per dimension and $maxPixels total pixels."
     }

@@ -66,9 +66,21 @@ Android packaging is in `evilo-android` because AGP separates applications from
 KMP Android libraries. Apple targets stay declared on non-macOS hosts.
 
 Shared source belongs in `commonMain`; platform code implements real dependencies
-only. Persistence uses Android private files, JVM app data, iOS Application
-Support, or browser localStorage. Storage locks are monitor/NSRecursiveLock or
-single-thread web execution; no cross-tab/process/device coordination is provided.
+only. Koin supplies one app-owned Ktor transport, the common MVI stores, and the
+Coil loader. Core stores expose `StateFlow` plus typed `dispatch(intent)`; Compose
+pages do not construct repositories or clients.
+
+DataStore stores typed Protobuf settings and plugin KV; Room3 stores subscriptions,
+catalog caches, installations, mandatory floors, and pending KV deletions. KSP
+generates Room implementations for all configured targets. Platform bindings use
+Android private files, JVM app data, iOS Application Support, or browser OPFS.
+Browsers use `WebOpfsStorage` and a `WebWorkerSQLiteDriver` with a bundled module
+worker/SQLite runtime; one tab per origin owns the SAH pool via a Web Lock. No
+old JSON/localStorage migration or memory fallback belongs in production startup.
+Plugin callbacks stage synchronous KV changes under per-ID operation mutexes;
+DataStore commits after a successful host operation. StoreLock protects staged
+memory, not disk persistence. Native multi-process/device synchronization is not
+provided. See `docs/application-architecture.md` for API and worker setup details.
 
 ## Build configuration
 

@@ -19,12 +19,14 @@ The configured SDK version is `1.0.0`; these changes do not establish remote
 artifact availability. Use the explicit local composite before publication.
 
 The host has three shared modules: `evilo-app` contains every Compose page,
-theme/resource, and bitmap decoder; `evilo-core` contains catalogs, network,
+theme/resource, Coil loader, and image header limits; `evilo-core` contains catalogs, network,
 storage, loading, sessions, and controllers; `evilo-library` contains portable
 models and the plugin/host protocol. Dependencies flow app to core to library.
 Sessions return permission-checked image bytes rather than Compose types.
 The app injects its generated public trust authority into the core session
 factory. Existing model/service packages and JSON envelopes remain unchanged.
+`docs/application-architecture.md` describes the shared MVI stores, isolated Koin
+application, Ktor transport, typed DataStore, and Room3 platform bindings.
 
 ## Protocol and extensibility
 
@@ -127,7 +129,8 @@ platform transport capability, not the plugin's signed permissions.
 
 The host bounds catalog/manifest downloads at 2 MiB, artifacts at 64 MiB, API
 responses at 2 MiB, images at 16 MiB, and request bodies at 64 KiB. Requests have a
-30-second total timeout and at most four simultaneous exchanges per transport.
+30-second total timeout and at most four simultaneous exchanges in the one
+application-owned Ktor transport.
 Manifest caching is disabled; upstream Wasmline owns artifact staging/cache with
 a configured native cache limit of 128 MiB. Descriptors use upstream's default
 16 KiB metadata-string limit. Plugin steps are bounded at 4 MiB, continuation
@@ -136,7 +139,13 @@ context at 128 KiB, HTTP exchanges at 512, chapters at 20,000, ordered images at
 
 PNG/JPEG/WebP dimensions are checked before decoding: image dimensions are limited
 to 16,384 and total pixels to 33,554,432. Icons have separate 1 MiB, 512-pixel,
-and 262,144-pixel bounds with a 32-entry cache. Remote SVG is unsupported.
+and 262,144-pixel bounds. Coil decodes the validated bytes and shares a 32 MiB
+memory cache with weak references and disk caching disabled. A Coil interceptor
+rechecks URL approval and session lifetime before memory-cache access and before
+returning a result. Media keys include a session-specific prefix and a hash of
+the approved URL/headers; closed sessions cannot reuse another session's cache.
+Unknown image models and automatic network components are disabled. Remote SVG
+is unsupported.
 
 The current upstream `WasmlineConfig` does not expose guest fuel, execution-time,
 or linear-memory budgets. HTTP/coroutine timeouts cannot interrupt a synchronous
@@ -158,21 +167,52 @@ value, and keys up to 128 characters. Versions/subscriptions of the same signed
 plugin ID share that namespace. Storage migration belongs to the plugin; there
 is no automatic account/login synchronization or encrypted credential storage.
 
-`PersistentKeyValueStore` publishes only after a complete snapshot write succeeds;
-batch edits make catalog caches, subscriptions, and version floors consistent.
-The aggregate JSON snapshot is limited to 32 MiB. Android uses private files,
-desktop uses app-data directories, iOS uses Application Support, and browsers
-use `localStorage`. File writes replace a sibling temporary file atomically.
-Browser quotas may be much smaller than 32 MiB, private browsing may deny storage,
-and failures preserve the previous snapshot. Multi-process or cross-tab write
-coordination and cross-device synchronization are not implemented.
+DataStore `1.3.0` stores preferences and plugin namespaces as typed Protobuf, with
+a 32 MiB aggregate limit. `PluginStorageSession.transaction` loads the namespace
+before calling the guest, accepts synchronous reads/writes in staged memory, and
+commits through `DataStore.updateData` only after the host operation succeeds.
+The callback's `writeValue(true)` acknowledges a staged write, not synchronous
+disk durability. Failure/cancellation before commit discards staged writes. Once
+commit starts, it finishes under `NonCancellable` without releasing the operation
+mutex early; a completed durable write cannot be rolled back by cancellation.
+Per-ID mutexes serialize sessions; namespace revisions reject conflicting writes
+from another app instance. Erasing a namespace increments its revision rather
+than reusing it.
+Runtime disposal waits for operations but does not depend on reading DataStore.
+
+Room3 `3.1.0-alpha03` stores subscriptions, catalog JSON, installation metadata,
+and mandatory version floors. KSP generates the database/DAO implementations on
+all configured targets. Catalog changes persist in a DAO transaction before the
+repository publishes them. Commit and state publication finish together even
+when cancellation arrives during a database write. Room and DataStore do not
+share a transaction: the last uninstall atomically records a pending data
+deletion in Room, then erases the DataStore namespace. Startup, refresh, and
+installation preparation retry unfinished cleanup. Removing a JSON source still
+retains plugin KV.
+
+Android uses private files, desktop uses app-data directories, and iOS uses
+Application Support. JS/Wasm JS use DataStore's `WebOpfsStorage` and a custom
+SQLite Worker with the persistent SAH pool VFS. The worker holds a Web Lock for
+one tab per origin, never clears files on initialization, and preserves the pool
+on initialization failure. It closes databases and releases handles before a
+normal shutdown. HTTPS or localhost, OPFS, Workers, and Web Locks are required;
+unsupported/private browser modes display a startup failure, not a silent memory
+fallback. Browser quotas/eviction remain possible. Native multi-process and
+cross-device synchronization are not implemented. Old JSON/localStorage formats
+are removed without migration; this is first-release development.
 
 The MD3 home has Browse and More destinations and a centered floating media-kind
-selector. Browse uses rounded tonal cards and an App Bar source-management action.
+selector. Browse uses compact rounded rows and an App Bar source-management action.
 The selected media kind filters plugins; More contains installed plugins, source
 management, and safety information. Compact layouts use a bottom bar; expanded
 layouts use a navigation rail. History/library/updates may be added later without
 presenting fake data as implemented reader features.
+Clicking an installed row opens it directly; an uninstalled row reviews a
+compatible release before installation. The gear to the left of the rounded
+chevron manages versions, updates, and uninstalling. Descriptions do not expand.
+One `HomeOverlay` state replaces settings/permission/source/uninstall windows
+rather than stacking them. Approval rechecks the exact reviewed release, and a
+same-release installation preserves its original record and timestamp.
 Text and images have in-app viewing code. Videos open in an external application
 after initial URL approval; custom HTTP headers are rejected. The external
 application controls its subsequent network/redirect/credential behavior.

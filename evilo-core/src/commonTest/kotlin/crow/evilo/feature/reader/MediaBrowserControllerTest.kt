@@ -13,6 +13,7 @@ import crow.evilo.plugin.api.PluginDescriptor
 import crow.evilo.plugin.api.PluginOperation
 import crow.evilo.plugin.api.PluginOperationKind
 import crow.evilo.plugin.api.PluginResult
+import crow.evilo.plugin.api.SourceRequest
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.test.runCurrent
@@ -36,10 +37,10 @@ class MediaBrowserControllerTest {
         }
         val controller = MediaBrowserController(session, MediaKind.MANGA, this)
         try {
-            controller.search("old")
+            controller.dispatch(MediaBrowserIntent.Search("old"))
             runCurrent()
             assertTrue(started)
-            controller.search("new")
+            controller.dispatch(MediaBrowserIntent.Search("new"))
             delayed.complete(PluginResult(items = listOf(item("old"))))
             runCurrent()
             assertEquals("new", controller.state.value.query)
@@ -61,13 +62,13 @@ class MediaBrowserControllerTest {
         }
         val controller = MediaBrowserController(session, MediaKind.MANGA, this)
         try {
-            controller.search("")
+            controller.dispatch(MediaBrowserIntent.Search(""))
             runCurrent()
-            controller.loadMore()
+            controller.dispatch(MediaBrowserIntent.LoadMore)
             runCurrent()
             assertEquals(2, controller.state.value.searchPage)
             assertEquals(listOf("a", "b"), controller.state.value.items.map { it.id.value })
-            controller.loadMore()
+            controller.dispatch(MediaBrowserIntent.LoadMore)
             runCurrent()
             assertEquals(2, calls)
         } finally {
@@ -94,17 +95,17 @@ class MediaBrowserControllerTest {
         }
         val controller = MediaBrowserController(session, MediaKind.MANGA, this)
         try {
-            controller.openItem(selected)
+            controller.dispatch(MediaBrowserIntent.OpenItem(selected))
             runCurrent()
             assertEquals(listOf(chapter), controller.state.value.chapters)
-            controller.openChapter(0)
+            controller.dispatch(MediaBrowserIntent.OpenChapter(0))
             runCurrent()
             assertEquals("Content request failed.", controller.state.value.error)
-            controller.retry()
+            controller.dispatch(MediaBrowserIntent.Retry)
             runCurrent()
             assertEquals("Chapter text", controller.state.value.content?.text)
             assertNull(controller.state.value.error)
-            controller.back()
+            controller.dispatch(MediaBrowserIntent.Back)
             runCurrent()
             assertEquals(MediaBrowserPage.DETAILS, controller.state.value.page)
             assertNull(controller.state.value.content)
@@ -125,6 +126,7 @@ class MediaBrowserControllerTest {
         }
         override suspend fun imageBytes(url: String, headers: Map<String, String>): ByteArray =
             error("These tests do not request images.")
+        override fun approveImageRequest(url: String, headers: Map<String, String>) = SourceRequest(url = url, headers = headers)
         override fun externalStreamUrl(stream: MediaStream): String = stream.url
         override suspend fun close() { closeCalls++; source.close() }
     }

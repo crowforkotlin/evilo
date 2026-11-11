@@ -30,7 +30,11 @@ interface EviloPluginService : WasmlineService {
 interface EviloHostService : WasmlineService {
     fun describeHost(): String
     fun readValue(key: String): String?
+
+    /** Accepts a staged write; durable storage commits after the host operation succeeds. */
     fun writeValue(key: String, value: String): Boolean
+
+    /** Removes a staged value; it follows the same commit boundary as [writeValue]. */
     fun removeValue(key: String): Boolean
     fun listKeys(prefix: String): String
 }

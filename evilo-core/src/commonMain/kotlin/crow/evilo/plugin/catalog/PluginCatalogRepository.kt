@@ -7,9 +7,11 @@ import crow.evilo.plugin.api.PluginJson
 import crow.evilo.plugin.api.incompatibility
 import crow.evilo.network.ktor.BoundedHttpTransport
 import crow.evilo.network.ktor.PluginUrlPolicy
-import crow.evilo.storage.KeyValueStore
-import crow.evilo.storage.StoreEdit
+import crow.evilo.storage.CatalogWrite
+import crow.evilo.storage.EviloPreferencesRepository
+import crow.evilo.storage.PluginCatalogStore
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -17,6 +19,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlin.time.Clock
 
 data class PluginRepositoryState(
@@ -39,7 +42,8 @@ data class PluginRepositoryState(
 }
 
 class PluginCatalogRepository(
-    private val store: KeyValueStore,
+    private val records: PluginCatalogStore,
+    private val preferences: EviloPreferencesRepository,
     private val transport: BoundedHttpTransport,
     val host: HostDescriptor,
     private val officialUrl: String = DEFAULT_OFFICIAL_CATALOG_URL,
@@ -56,9 +60,9 @@ class PluginCatalogRepository(
         if (mutableState.value.initialized) return@withLock
         PluginUrlPolicy.check(officialUrl)
         val official = CatalogSubscription(OFFICIAL_SOURCE_ID, officialUrl)
-        val saved = store.read(NAMESPACE, "subscriptions")?.let {
-            PluginJson.decodeFromString<List<CatalogSubscription>>(it)
-        }.orEmpty()
+        val stored = records.read()
+        cleanupPluginData(stored.pendingDataDeletes)
+        val saved = stored.subscriptions
         require(saved.size <= 16 && saved.distinctBy { it.id }.size == saved.size &&
             saved.distinctBy { it.url }.size == saved.size) { "Invalid stored plugin subscriptions." }
         saved.forEach {
@@ -71,34 +75,34 @@ class PluginCatalogRepository(
             saved.filterNot { it.id == OFFICIAL_SOURCE_ID }
         val bundled = parser.parse(bundledOfficialJson, false)
         val snapshots = subscriptions.mapNotNull { source ->
-            val cached = store.read(CACHE_NAMESPACE, source.id)?.let { parser.parse(it, source.allowHttp) }
+            val cached = stored.cachedCatalogs[source.id]?.let { parser.parse(it, source.allowHttp) }
             (cached ?: bundled.takeIf { source.id == OFFICIAL_SOURCE_ID })?.let {
                 CatalogSnapshot(source, it, fromCache = cached != null)
             }
         }
-        val installed = store.read(NAMESPACE, "installed")?.let {
-            PluginJson.decodeFromString<List<InstalledPlugin>>(it)
-        }.orEmpty()
+        val installed = stored.installed
         require(installed.size <= 256 && installed.distinctBy { it.key }.size == installed.size) { "Invalid stored installations." }
         installed.forEach { installation ->
             parser.validate(PluginCatalog(PLUGIN_CATALOG_SCHEMA_VERSION, "stored", "Stored", "",
                 installation.plugin.updatedAt, listOf(installation.plugin)), installation.allowHttp)
             require(installation.release in installation.plugin.availableVersions) { "Stored installation has no matching release." }
         }
-        updateFloors = store.read(NAMESPACE, "updateFloors")?.let { PluginJson.decodeFromString<Map<String, Long>>(it) }.orEmpty()
-        val kind = store.read(NAMESPACE, "mediaKind")?.let { PluginJson.decodeFromString<MediaKind>(it) } ?: MediaKind.MANGA
-        val showNsfw = store.read(NAMESPACE, "showNsfw") == "true"
+        updateFloors = stored.updateFloors
+        require(updateFloors.values.all { it >= 1 }) { "Invalid stored mandatory version floors." }
+        val settings = preferences.currentSettings()
         val floors = nextUpdateFloors(snapshots)
-        if (floors != updateFloors) store.write(NAMESPACE, "updateFloors", PluginJson.encodeToString(floors))
-        updateFloors = floors
-        mutableState.value = PluginRepositoryState(true, subscriptions = subscriptions, snapshots = snapshots,
-            installed = installed, selectedKind = kind, showNsfw = showNsfw)
+        persistAndPublish(CatalogWrite(subscriptions = subscriptions, updateFloors = floors)) {
+            updateFloors = floors
+            mutableState.value = PluginRepositoryState(true, subscriptions = subscriptions, snapshots = snapshots,
+                installed = installed, selectedKind = settings.selectedKind, showNsfw = settings.showNsfw)
+        }
     }
 
     suspend fun refresh() = operations.withLock {
         check(mutableState.value.initialized) { "Plugin repository is not initialized." }
         mutableState.update { it.copy(refreshing = true, error = null) }
         try {
+            cleanupPluginData(records.read().pendingDataDeletes)
             for (subscription in mutableState.value.subscriptions.filter { it.enabled }) {
                 val previous = mutableState.value.snapshots.firstOrNull { it.subscription.id == subscription.id }
                 try {
@@ -107,10 +111,11 @@ class PluginCatalogRepository(
                     val snapshot = CatalogSnapshot(subscription, catalog)
                     val next = mutableState.value.snapshots.filterNot { it.subscription.id == subscription.id } + snapshot
                     val floors = nextUpdateFloors(next)
-                    store.edit(listOf(StoreEdit(CACHE_NAMESPACE, subscription.id, PluginJson.encodeToString(catalog)),
-                        StoreEdit(NAMESPACE, "updateFloors", PluginJson.encodeToString(floors))))
-                    updateFloors = floors
-                    mutableState.update { it.copy(snapshots = next) }
+                    persistAndPublish(CatalogWrite(cachedCatalogs = mapOf(subscription.id to PluginJson.encodeToString(catalog)),
+                        updateFloors = floors)) {
+                        updateFloors = floors
+                        mutableState.update { it.copy(snapshots = next) }
+                    }
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (failure: Exception) {
@@ -137,11 +142,11 @@ class PluginCatalogRepository(
         val subscriptions = mutableState.value.subscriptions + source
         val snapshots = mutableState.value.snapshots + CatalogSnapshot(source, catalog)
         val floors = nextUpdateFloors(snapshots)
-        store.edit(listOf(StoreEdit(CACHE_NAMESPACE, source.id, PluginJson.encodeToString(catalog)),
-            StoreEdit(NAMESPACE, "subscriptions", PluginJson.encodeToString(subscriptions)),
-            StoreEdit(NAMESPACE, "updateFloors", PluginJson.encodeToString(floors))))
-        updateFloors = floors
-        mutableState.update { it.copy(subscriptions = subscriptions, snapshots = snapshots, error = null) }
+        persistAndPublish(CatalogWrite(subscriptions = subscriptions,
+            cachedCatalogs = mapOf(source.id to PluginJson.encodeToString(catalog)), updateFloors = floors)) {
+            updateFloors = floors
+            mutableState.update { it.copy(subscriptions = subscriptions, snapshots = snapshots, error = null) }
+        }
     }
 
     suspend fun removeSource(sourceId: String) = operations.withLock {
@@ -149,30 +154,37 @@ class PluginCatalogRepository(
         val subscriptions = mutableState.value.subscriptions.filterNot { it.id == sourceId }
         val installed = mutableState.value.installed.filterNot { it.sourceId == sourceId }
         val floors = updateFloors.filterKeys { !it.startsWith("$sourceId:") }
-        store.edit(listOf(StoreEdit(NAMESPACE, "subscriptions", PluginJson.encodeToString(subscriptions)),
-            StoreEdit(NAMESPACE, "installed", PluginJson.encodeToString(installed)), StoreEdit(CACHE_NAMESPACE, sourceId),
-            StoreEdit(NAMESPACE, "updateFloors", PluginJson.encodeToString(floors))))
-        updateFloors = floors
-        mutableState.update { it.copy(subscriptions = subscriptions,
-            snapshots = it.snapshots.filterNot { snapshot -> snapshot.subscription.id == sourceId }, installed = installed) }
+        persistAndPublish(CatalogWrite(subscriptions = subscriptions, installed = installed,
+            removeCachedCatalogs = setOf(sourceId), updateFloors = floors)) {
+            updateFloors = floors
+            mutableState.update { it.copy(subscriptions = subscriptions,
+                snapshots = it.snapshots.filterNot { snapshot -> snapshot.subscription.id == sourceId }, installed = installed) }
+        }
     }
 
     suspend fun setSourceEnabled(sourceId: String, enabled: Boolean) = operations.withLock {
         val subscriptions = mutableState.value.subscriptions.map { if (it.id == sourceId) it.copy(enabled = enabled) else it }
-        store.write(NAMESPACE, "subscriptions", PluginJson.encodeToString(subscriptions))
-        mutableState.update { it.copy(subscriptions = subscriptions, snapshots = it.snapshots.map { snapshot ->
-            snapshot.copy(subscription = subscriptions.first { source -> source.id == snapshot.subscription.id })
-        }) }
+        persistAndPublish(CatalogWrite(subscriptions = subscriptions)) {
+            mutableState.update { it.copy(subscriptions = subscriptions, snapshots = it.snapshots.map { snapshot ->
+                snapshot.copy(subscription = subscriptions.first { source -> source.id == snapshot.subscription.id })
+            }) }
+        }
     }
 
     suspend fun selectKind(kind: MediaKind) = operations.withLock {
-        store.write(NAMESPACE, "mediaKind", PluginJson.encodeToString(kind))
-        mutableState.update { it.copy(selectedKind = kind) }
+        currentCoroutineContext().ensureActive()
+        withContext(NonCancellable) {
+            preferences.selectKind(kind)
+            mutableState.update { it.copy(selectedKind = kind) }
+        }
     }
 
     suspend fun setShowNsfw(show: Boolean) = operations.withLock {
-        store.write(NAMESPACE, "showNsfw", show.toString())
-        mutableState.update { it.copy(showNsfw = show) }
+        currentCoroutineContext().ensureActive()
+        withContext(NonCancellable) {
+            preferences.setShowNsfw(show)
+            mutableState.update { it.copy(showNsfw = show) }
+        }
     }
 
     fun releaseBlockReason(listing: CatalogListing, release: PluginRelease): String? {
@@ -211,21 +223,47 @@ class PluginCatalogRepository(
             verified.kinds == release.kinds && verified.languages == release.languages) {
             "The signed plugin descriptor does not match its catalog release."
         }
+        if (mutableState.value.installed.any { it.key == current.key && it.release == release }) return@withLock
         val installation = InstalledPlugin(current.snapshot.subscription.id, current.snapshot.subscription.url,
             current.plugin, release, Clock.System.now().toString(), current.snapshot.subscription.allowHttp)
         val installed = mutableState.value.installed.filterNot { it.key == installation.key } + installation
         require(installed.size <= 256) { "At most 256 plugins can be installed." }
-        store.write(NAMESPACE, "installed", PluginJson.encodeToString(installed))
-        mutableState.update { it.copy(installed = installed) }
+        require(current.plugin.id !in records.read().pendingDataDeletes) { "Plugin data cleanup is incomplete; refresh before installing." }
+        persistAndPublish(CatalogWrite(installed = installed)) {
+            mutableState.update { it.copy(installed = installed) }
+        }
     }
 
     suspend fun uninstall(key: String, eraseData: Boolean) = operations.withLock {
-        val previous = mutableState.value.installed.firstOrNull { it.key == key } ?: return@withLock
+        val previous = mutableState.value.installed.firstOrNull { it.key == key }
+        if (previous == null) {
+            cleanupPluginData(records.read().pendingDataDeletes)
+            return@withLock
+        }
         val installed = mutableState.value.installed.filterNot { it.key == key }
-        val edits = mutableListOf(StoreEdit(NAMESPACE, "installed", PluginJson.encodeToString(installed)))
-        if (eraseData && installed.none { it.plugin.id == previous.plugin.id }) edits += StoreEdit("plugin.${previous.plugin.id}")
-        store.edit(edits)
-        mutableState.update { it.copy(installed = installed) }
+        val deletedIds = if (eraseData && installed.none { it.plugin.id == previous.plugin.id }) setOf(previous.plugin.id) else emptySet()
+        // A Room deletion record makes DataStore cleanup retryable without pretending the two stores share a transaction.
+        persistAndPublish(CatalogWrite(installed = installed, pendingDataDeletes = deletedIds)) {
+            mutableState.update { it.copy(installed = installed) }
+        }
+        cleanupPluginData(deletedIds)
+    }
+
+    suspend fun prepareInstallation() = operations.withLock { cleanupPluginData(records.read().pendingDataDeletes) }
+
+    private suspend fun cleanupPluginData(pluginIds: Set<String>) {
+        if (pluginIds.isEmpty()) return
+        pluginIds.forEach { preferences.erasePluginData(it) }
+        records.write(CatalogWrite(completedDataDeletes = pluginIds))
+    }
+
+    private suspend fun persistAndPublish(change: CatalogWrite, publish: () -> Unit) {
+        currentCoroutineContext().ensureActive()
+        // Cancellation cannot leave live state behind a database transaction that already committed.
+        withContext(NonCancellable) {
+            records.write(change)
+            publish()
+        }
     }
 
     private suspend fun fetch(subscription: CatalogSubscription): PluginCatalog {
@@ -245,8 +283,4 @@ class PluginCatalogRepository(
         return next
     }
 
-    private companion object {
-        const val NAMESPACE = "host.plugins"
-        const val CACHE_NAMESPACE = "host.catalog-cache"
-    }
 }

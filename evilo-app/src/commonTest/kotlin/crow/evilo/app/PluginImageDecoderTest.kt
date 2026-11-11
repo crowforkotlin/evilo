@@ -49,7 +49,7 @@ class PluginImageDecoderTest {
             0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52,
             0, 1, 0, 0, 0, 1, 0, 0,
         )
-        assertFailsWith<IllegalStateException> { decodePluginImage(header) }
+        assertFailsWith<IllegalStateException> { validatePluginImage(header) }
     }
 
     @Test

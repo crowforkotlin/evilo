@@ -2,8 +2,7 @@ package crow.evilo.plugin.runtime
 
 import crow.evilo.plugin.api.HOST_STORAGE_CAPABILITY
 import crow.evilo.plugin.api.HostDescriptor
-import crow.evilo.storage.MemorySnapshotPersistence
-import crow.evilo.storage.PersistentKeyValueStore
+import crow.evilo.storage.MemoryKeyValueStore
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -15,7 +14,7 @@ class PluginHostStorageServiceTest {
 
     @Test
     fun pluginsCannotReadHostValuesOrAnotherPluginsNamespace() {
-        val store = PersistentKeyValueStore(MemorySnapshotPersistence())
+        val store = MemoryKeyValueStore()
         store.write("host.plugins", "setting", "host")
         val one = PluginHostStorageService("one", host, store, true)
         val two = PluginHostStorageService("two", host, store, true)
@@ -27,7 +26,7 @@ class PluginHostStorageServiceTest {
 
     @Test
     fun missingConsentBlocksEveryStorageOperation() {
-        val service = PluginHostStorageService("one", host, PersistentKeyValueStore(MemorySnapshotPersistence()), false)
+        val service = PluginHostStorageService("one", host, MemoryKeyValueStore(), false)
         assertFailsWith<IllegalStateException> { service.readValue("a") }
         assertFailsWith<IllegalStateException> { service.writeValue("a", "1") }
         assertFailsWith<IllegalStateException> { service.removeValue("a") }
@@ -36,7 +35,7 @@ class PluginHostStorageServiceTest {
 
     @Test
     fun rejectedQuotaChangesDoNotReplaceExistingValues() {
-        val service = PluginHostStorageService("one", host, PersistentKeyValueStore(MemorySnapshotPersistence()), true)
+        val service = PluginHostStorageService("one", host, MemoryKeyValueStore(), true)
         service.writeValue("a", "12")
         service.writeValue("b", "12")
         assertFailsWith<IllegalArgumentException> { service.writeValue("a", "123") }
@@ -49,7 +48,7 @@ class PluginHostStorageServiceTest {
 
     @Test
     fun controlCharactersAreRejectedInKeysAndPrefixes() {
-        val service = PluginHostStorageService("one", host, PersistentKeyValueStore(MemorySnapshotPersistence()), true)
+        val service = PluginHostStorageService("one", host, MemoryKeyValueStore(), true)
         assertFailsWith<IllegalArgumentException> { service.readValue("a\u007f") }
         assertFailsWith<IllegalArgumentException> { service.listKeys("a\u007f") }
     }

@@ -36,7 +36,7 @@ evilo-build-logic/
   base/                      KMP/Android conventions and shared property lookup
   app/                       Compose/desktop/web conventions and signing/catalog tasks
 plugin-repository/           Bundled official JSON and catalog schema
-docs/                        Plugin architecture and catalog contract
+docs/                        Plugin contracts and shared UI design rules
 ```
 
 Dependencies flow `evilo-app -> evilo-core -> evilo-library`. Only the library is
@@ -49,23 +49,63 @@ UI uses `crow.evilo.app`, `crow.evilo.ui`, and `crow.evilo.feature.*` inside
 
 `evilo-app` supplies `App()` for every platform. Android calls it from
 `MainActivity`, desktop from `MainKt`, web through `WebApp()`, and iOS through
-`MainViewController`. `evilo-app` owns colors, typography, Noto Sans SC, rounded
-shapes, and width limits. Compact windows use Browse/More with a centered content
-selector; at 840 dp the same navigation moves to a rail. Page content is capped
-at 1320 dp and reading at 900 dp. Cards, filter chips, source/install counts, empty
-states, settings, and safety sections adapt without platform-specific page copies.
+`MainViewController`. `evilo-app` owns the teal light/dark palettes, the supplied
+ChillRoundM SemiBold font, typography, rounded shapes, and width limits. Compact
+windows use Browse/More with a centered 64 dp circular content-selector FAB; at
+600 dp the same navigation moves to a rail. Page content is capped at 1200 dp
+and reading at 900 dp. Cards, search/filter controls, empty states, grouped
+settings, and source/permission sheets share the same rules without
+platform-specific page copies. Colors, font sizes, spacing, radii, elevation,
+responsive behavior, and the font license are documented in
+[`docs/design-system.md`](docs/design-system.md).
 
 Shared modules retain Android, JVM, iOS ARM64/simulator ARM64, JS, and Wasm JS.
 Only `evilo-library` also declares Wasm WASI for guests.
 `evilo-desktop` and `evilo-web` own executables; `evilo-app` exports the static
 `Evilo` Apple framework. Apple builds require macOS/Xcode, not target removal.
 
+## Frameworks and application architecture
+
+Versions are declared once in `gradle/libs.versions.toml`:
+
+| Responsibility | Framework | Configured version |
+| --- | --- | --- |
+| Image requests, memory cache, decoding, Compose rendering | Coil | `3.6.3` |
+| All host HTTP transport | Ktor | `3.6.1` |
+| Signed plugin loading and synchronous services | Wasmline | `1.0.0-beta1` |
+| Settings and plugin key/value data | DataStore | `1.3.0` |
+| Catalog subscriptions, caches, installation records, update floors | Room3 | `3.1.0-alpha03` |
+| Room DAO/database generation | KSP | `2.3.13` |
+| Catalog/protocol JSON and preferences Protobuf | kotlinx.serialization | `1.12.0` |
+| Application dependencies and parameterized reader controllers | Koin | `4.3.0-Beta1` |
+
+Kotlin is `2.4.10` to satisfy Coil `3.6.3`'s published Kotlin requirement.
+Room3 and Koin intentionally use the requested alpha/beta versions; configuration
+is not a claim of successful dependency resolution or platform compilation.
+
+`App()` owns an isolated Koin application. Shared MVI stores expose immutable
+`StateFlow` state and accept typed `dispatch(intent)` calls. Compose pages do not
+construct repositories, HTTP clients, or platform stores. The app has one Ktor
+transport and one Coil loader; plugin image requests use custom permission-aware
+Coil components, not unrestricted URL loading. See
+[`docs/application-architecture.md`](docs/application-architecture.md) for entry
+points, store usage, disposal, storage semantics, and browser setup.
+
 ## Current behavior and limits
 
 Browse lists JSON sources and supports search plus All/Installed/Officially
 reviewed filters. The manga/novel/anime/film selector filters both available and
 installed plugins. More contains source management, NSFW preference, installed
-plugins, and safety information. NSFW is hidden by default.
+plugins, appearance information, and safety information. NSFW is hidden by
+default. Appearance follows the system; the font and theme rows are descriptive,
+not manual appearance controls.
+
+Browse and More use the same compact rounded plugin row. Descriptions are limited
+to two lines, without expansion. The rounded settings gear sits immediately left
+of the rightmost rounded chevron. Clicking an installed row opens it; clicking an
+uninstalled row reviews the recommended compatible release before first install.
+The gear manages versions, updates, and uninstalling. The same installed release
+is not reinstalled and its original installation timestamp is retained.
 
 Users do not enter Ed25519 keys, key IDs, or individual WLM URLs. Installations
 require a compatible release, matching signed source provenance, the app authority
@@ -94,10 +134,12 @@ addresses.
    plain HTTP requires explicit cleartext consent.
 3. Select a content type supported by the plugin. NSFW entries remain hidden
    unless their preference is enabled in More.
-4. Open a plugin entry, select a compatible available version, and tap Install.
-   Review its source and requested permissions, then tap Approve and Install.
-5. Use Open to enter an installed plugin. No WLM URL, key ID, or Ed25519 key is
-   entered by the user.
+4. Tap an uninstalled plugin row. Review the recommended version, actual source
+   links, and requested permissions, then tap Approve and Install. Use the gear
+   to choose another compatible version when needed.
+5. Tap the installed row to enter it directly. The gear manages updates and
+   uninstalling, not a repeated installation step. No WLM URL, key ID, or Ed25519
+   key is entered by the user.
 
 The official source is already subscribed. An empty `official.json` means there
 are no official releases to install; refreshing an empty list does not create a
@@ -138,8 +180,8 @@ changes are maintained once in `evilo-library`. Consolidation preserves the
 serialized protocol and service packages; it does not change the bridge ABI.
 
 `evilo-core` owns plugin connections and reader state without depending on Compose.
-Sessions return permission-checked image bytes; `evilo-app` performs bounded
-bitmap decoding. The app supplies its generated public signing authority to
+Sessions return permission-checked image bytes; `evilo-app` validates image headers
+before Coil decodes them. The app supplies its generated public signing authority to
 `PluginSessionFactory`; neither the core nor catalogs choose replacement keys.
 
 `EviloPluginService` uses synchronous fixed JSON envelopes; `EviloHostService`
@@ -163,8 +205,21 @@ private material. Custom catalogs cannot change the trust authority.
 
 Plugin storage is persistent and scoped by signed ID: default 1 MiB total,
 256 entries, 64 KiB/value, and 128-character keys. It is not encrypted credential
-storage. Android/JVM/iOS use private files; browser localStorage has additional
-quota/availability limits. No cross-device/process synchronization is implemented.
+storage. Synchronous guest writes stage values in the current host operation;
+successful operations commit with DataStore's suspending `updateData`. Failure or
+cancellation before commit discards staged values. Once commit starts, it retains
+the operation mutex until persistence completes; cancellation cannot undo a
+durable write. Storage failures are reported.
+
+DataStore stores typed Protobuf in `evilo.preferences.pb`; Room3 stores catalog
+records in `evilo.catalogs.db`. Android uses app-private storage, desktop uses app
+data, and iOS uses Application Support. Both JS and Wasm JS use OPFS: DataStore's
+`WebOpfsStorage` and a Room3 `WebWorkerSQLiteDriver` with the SQLite SAH pool VFS.
+Browser storage requires HTTPS or localhost, OPFS, Web Workers, and Web Locks;
+only one evilo tab per origin can own the database. Browser quotas and eviction
+still apply. There is no cross-device synchronization or native multi-process
+storage support. The previous JSON/localStorage persistence implementation is
+removed; this unreleased app does not read or migrate that old format.
 
 See `docs/plugin-architecture.md` for network policies and remaining runtime
 limits, and `docs/plugin-catalog.md` for metadata, actual-source requirements,

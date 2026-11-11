@@ -48,7 +48,24 @@ kotlin {
         commonMain.dependencies {
             api(projects.eviloCore)
             implementation(libs.compose.animation)
+            implementation(libs.coil.compose)
+            implementation(libs.coil.core)
+            implementation(libs.koin.compose)
+            implementation(libs.androidx.datastore.okio)
             implementation(libs.okio)
+        }
+        androidMain.dependencies {
+            implementation(libs.androidx.sqlite.bundled)
+        }
+        jvmMain.dependencies {
+            implementation(libs.androidx.sqlite.bundled)
+        }
+        iosMain.dependencies {
+            implementation(libs.androidx.sqlite.bundled)
+        }
+        webMain.dependencies {
+            implementation(libs.androidx.sqlite.web)
+            implementation(libs.kotlin.dom.api)
         }
     }
 }

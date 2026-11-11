@@ -116,6 +116,7 @@ class PluginHttpClient(
     }
 
     fun approvedStreamUrl(url: String, headers: Map<String, String>): String = policy.mediaRequest(url, headers).url
+    fun approvedImageRequest(url: String, headers: Map<String, String>): SourceRequest = policy.mediaRequest(url, headers)
 }
 
 private val APPROVED_METHODS = setOf("GET", "HEAD", "POST", "PUT", "PATCH", "DELETE")

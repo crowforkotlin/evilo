@@ -1,0 +1,23 @@
+SQLite Web runtime notices
+
+The web distribution includes unmodified runtime files from:
+  @sqlite.org/sqlite-wasm 3.54.1-build1
+  https://github.com/sqlite/sqlite-wasm
+
+The npm package declares Apache-2.0. Its license terms are included in
+APACHE-2.0.txt. Package metadata and build configuration select the version;
+this notice does not imply that a distribution has already been built.
+
+The bundled index.mjs includes SQLite's WebAssembly/JavaScript APIs and
+Emscripten-generated glue. Its preserved license header identifies:
+  - SQLite code as released under the same public-domain terms as SQLite C.
+  - Emscripten glue as covered by MIT and University of Illinois/NCSA terms:
+    https://emscripten.org/docs/introducing_emscripten/emscripten_license.html
+
+SQLite source and license information:
+  https://sqlite.org/
+  https://sqlite.org/copyright.html
+
+Keep the upstream license headers in index.mjs and sqlite3-opfs-async-proxy.js
+when copying or distributing the runtime. Evilo's worker is separate application
+code and does not change these upstream files.
