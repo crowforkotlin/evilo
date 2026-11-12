@@ -3,15 +3,44 @@
 package crow.evilo.architecture
 
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class LatestOperationTest {
+    @Test
+    fun explicitCancellationSuppressesLateErrorsAndStillWaitsForCleanup() = runTest {
+        val operations = LatestOperation(this)
+        val gate = CompletableDeferred<Unit>()
+        var failures = 0
+        var finishes = 0
+        var cleaned = false
+        try {
+            operations.launch(onFailure = { failures++ }, onFinish = { finishes++ }) {
+                try {
+                    withContext(NonCancellable) { gate.await() }
+                    error("Obsolete failure.")
+                } finally { cleaned = true }
+            }
+            runCurrent()
+            operations.cancel()
+            gate.complete(Unit)
+            operations.awaitIdle()
+            assertTrue(cleaned)
+            assertEquals(0, failures)
+            assertEquals(0, finishes)
+            operations.launch(onFailure = { throw it }, onFinish = { finishes++ }) {}
+            operations.awaitIdle()
+            assertEquals(1, finishes)
+        } finally { gate.complete(Unit); operations.close() }
+    }
+
     @Test
     fun awaitingIdleFollowsAReplacementAndIgnoresObsoleteFinalization() = runTest {
         val operations = LatestOperation(this)

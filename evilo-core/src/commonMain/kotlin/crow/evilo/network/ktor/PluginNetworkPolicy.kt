@@ -9,25 +9,31 @@ import crow.evilo.plugin.api.SourceResponse
 import io.ktor.http.URLProtocol
 import io.ktor.http.Url
 import io.ktor.http.decodeURLPart
+import kotlinx.coroutines.CancellationException
 
 object PluginUrlPolicy {
     fun check(value: String, allowHttp: Boolean = false): Url {
-        require(value.length <= 4096 && (value.startsWith("https://") || value.startsWith("http://"))) {
+        requireNetwork(value.length <= 4096 && (value.startsWith("https://") || value.startsWith("http://")), NetworkPolicyViolation.INVALID_URL) {
             "An absolute HTTP(S) URL is required."
         }
-        require(value.none { it <= ' ' || it == '\u007f' || it == '\\' || it == '#' }) { "Invalid characters in URL." }
-        val url = Url(value)
+        requireNetwork(value.none { it <= ' ' || it == '\u007f' || it == '\\' || it == '#' }, NetworkPolicyViolation.INVALID_URL) { "Invalid characters in URL." }
+        val url = try { Url(value) }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (failure: Exception) { throw NetworkPolicyException(NetworkPolicyViolation.INVALID_URL, "Cannot parse the HTTP(S) URL.", failure) }
         val authority = value.substringAfter("://").substringBefore('/').substringBefore('?')
-        require(url.host.isNotBlank() && url.host.length <= 253 && url.user == null && '@' !in authority) { "URL credentials or oversized hostnames are not allowed." }
-        require(url.protocol == URLProtocol.HTTPS || (allowHttp && url.protocol == URLProtocol.HTTP)) {
+        requireNetwork(url.host.isNotBlank() && url.host.length <= 253, NetworkPolicyViolation.INVALID_URL) { "Invalid or oversized hostname." }
+        requireNetwork(url.user == null && '@' !in authority, NetworkPolicyViolation.URL_CREDENTIALS) { "URL credentials are not allowed." }
+        requireNetwork(url.protocol == URLProtocol.HTTPS || (allowHttp && url.protocol == URLProtocol.HTTP), NetworkPolicyViolation.CLEARTEXT_NOT_APPROVED) {
             "HTTP requires explicit cleartext consent; use HTTPS where possible."
         }
         url.rawSegments.forEach { segment ->
             var decoded = segment
             repeat(3) {
-                decoded = decoded.decodeURLPart()
-                require(decoded.none { it <= ' ' || it == '\u007f' || it == '\\' } &&
-                    decoded.split('/').none { it == "." || it == ".." }) { "URL path traversal is not allowed." }
+                decoded = try { decoded.decodeURLPart() }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (failure: Exception) { throw NetworkPolicyException(NetworkPolicyViolation.INVALID_URL, "Cannot decode the URL path.", failure) }
+                requireNetwork(decoded.none { it <= ' ' || it == '\u007f' || it == '\\' } &&
+                    decoded.split('/').none { it == "." || it == ".." }, NetworkPolicyViolation.URL_PATH) { "URL path traversal is not allowed." }
             }
         }
         return url
@@ -75,21 +81,24 @@ class PluginNetworkPolicy(
     private fun approve(request: SourceRequest, access: HttpAccess): SourceRequest {
         val url = PluginUrlPolicy.check(request.url, allowHttp)
         val approvedOrigins = access.origins.map { PluginUrlPolicy.origin(PluginUrlPolicy.check(it, allowHttp)) }.toSet()
-        require(PluginUrlPolicy.origin(url) in approvedOrigins && access.pathPrefixes.any { prefix ->
+        requireNetwork(PluginUrlPolicy.origin(url) in approvedOrigins && access.pathPrefixes.any { prefix ->
             url.encodedPath == prefix || url.encodedPath.startsWith(if (prefix.endsWith('/')) prefix else "$prefix/")
-        }) { "Network URL is not approved for plugin $pluginId: ${url.host}." }
-        require(request.method in access.methods) { "HTTP method ${request.method} is not approved." }
+        }, NetworkPolicyViolation.ORIGIN_OR_PATH_NOT_APPROVED) { "Network URL is not approved for plugin $pluginId: ${url.host}." }
+        requireNetwork(request.method in access.methods, NetworkPolicyViolation.METHOD_NOT_APPROVED) { "HTTP method ${request.method} is not approved." }
         val body = request.body
-        require(body == null || (request.method in setOf("POST", "PUT", "PATCH") &&
-            body.encodeToByteArray().size <= 64 * 1024)) { "Invalid or oversized HTTP request body." }
-        require(request.headers.size <= 32) { "Too many HTTP headers." }
+        requireNetwork(body == null || (request.method in setOf("POST", "PUT", "PATCH") &&
+            body.encodeToByteArray().size <= 64 * 1024), NetworkPolicyViolation.REQUEST_BODY) { "Invalid or oversized HTTP request body." }
+        requireNetwork(request.headers.size <= 32, NetworkPolicyViolation.HEADERS_NOT_APPROVED) { "Too many HTTP headers." }
         val headers = mutableMapOf<String, String>()
         request.headers.forEach { (name, value) ->
             val normalized = name.lowercase()
-            require(normalized in access.headers && normalized !in headers && normalized !in FORBIDDEN_HEADERS) {
+            val diagnosticHeader = normalized.takeIf { it.length <= 64 && HEADER_NAME.matches(it) }
+            requireNetwork(normalized in access.headers && normalized !in headers && normalized !in FORBIDDEN_HEADERS,
+                NetworkPolicyViolation.HEADERS_NOT_APPROVED, rejectedHeader = diagnosticHeader) {
                 "HTTP header '$name' is not approved."
             }
-            require(value.length <= 4096 && value.none { it < ' ' || it == '\u007f' }) { "Invalid HTTP header value." }
+            requireNetwork(value.length <= 4096 && value.none { it < ' ' || it == '\u007f' },
+                NetworkPolicyViolation.HEADERS_NOT_APPROVED, rejectedHeader = diagnosticHeader) { "Invalid HTTP header value." }
             headers[normalized] = value
         }
         return request.copy(url = url.toString(), headers = headers)
@@ -111,7 +120,7 @@ class PluginHttpClient(
     suspend fun imageBytes(url: String, headers: Map<String, String>): ByteArray {
         val approved = policy.mediaRequest(url, headers)
         val response = transport.fetch(approved, 16 * 1024 * 1024)
-        require(response.statusCode in 200..299) { "Image request failed: HTTP ${response.statusCode}." }
+        if (response.statusCode !in 200..299) throw HttpStatusException(response.statusCode)
         return response.bytes
     }
 

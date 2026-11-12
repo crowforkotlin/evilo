@@ -8,7 +8,7 @@ Wasmline plugins loaded from JSON catalogs, not app dependencies or APK extensio
 
 | Repository | Responsibility |
 | --- | --- |
-| `https://github.com/crowforkotlin/evilo` | Host app, maintained plugin SDK, official JSON catalog |
+| `https://github.com/crowforkotlin/evilo` | Host app, maintained plugin SDK, bundled JSON catalog |
 | `https://github.com/crowforkotlin/evilo-plugin-templatea` | Provider-neutral multi-module template |
 
 The template's local directory remains `../evilo-plugin-template`; its remote
@@ -35,7 +35,7 @@ evilo-ios/                   Xcode/SwiftUI launcher; not a Gradle subproject
 evilo-build-logic/
   base/                      KMP/Android conventions and shared property lookup
   app/                       Compose/desktop/web conventions and signing/catalog tasks
-plugin-repository/           Bundled official JSON and catalog schema
+plugin-repository/           One editable bundled plugin.json
 docs/                        Plugin contracts and shared UI design rules
 ```
 
@@ -54,7 +54,7 @@ ChillRoundM SemiBold font, typography, rounded shapes, and width limits. Compact
 windows use Browse/More with a centered 64 dp circular content-selector FAB; at
 600 dp the same navigation moves to a rail. Page content is capped at 1200 dp
 and reading at 900 dp. Cards, search/filter controls, empty states, grouped
-settings, and source/permission sheets share the same rules without
+settings, source/detail pages, and confirmation dialogs share the same rules without
 platform-specific page copies. Colors, font sizes, spacing, radii, elevation,
 responsive behavior, and the font license are documented in
 [`docs/design-system.md`](docs/design-system.md).
@@ -93,33 +93,76 @@ points, store usage, disposal, storage semantics, and browser setup.
 
 ## Current behavior and limits
 
-Browse lists JSON sources and supports search plus All/Installed/Officially
-reviewed filters. The manga/novel/anime/film selector filters both available and
-installed plugins. More contains source management, NSFW preference, installed
-plugins, appearance information, and safety information. NSFW is hidden by
-default. Appearance follows the system; the font and theme rows are descriptive,
-not manual appearance controls.
+Browse is the installed-plugin entry point, not a catalog store. It shows local
+search, optional source filtering, and installed plugins grouped by source.
+Rows contain an icon, name, compact labels, and a separate Info action. The row
+opens the installed plugin's works catalog directly; Info opens plugin details
+without connecting a works session. Blocked installations remain manageable.
+Disabled sources retain their records but cannot be opened and are hidden in Browse.
 
-Browse and More use the same compact rounded plugin row. Descriptions are limited
-to two lines, without expansion. The rounded settings gear sits immediately left
-of the rightmost rounded chevron. Clicking an installed row opens it; clicking an
-uninstalled row reviews the recommended compatible release before first install.
-The gear manages versions, updates, and uninstalling. The same installed release
-is not reinstalled and its original installation timestamp is retained.
+The App Bar's Plugin Sources action opens source management. Each source has its
+own All/Installed catalog, search, enabled state, check results, and read-only URL
+settings. Installable, uninstalled catalog entries appear there, not in Browse.
+More contains Settings, Plugin Sources, Safety, and About. Settings groups Browse
+and content, Plugins and sources, Images, Appearance, Security, and About; raw
+installation management includes disabled sources and every installed copy.
+NSFW is hidden by default. Appearance and font rows describe the existing system
+theme and bundled ChillRoundM font, not unimplemented appearance switches.
+
+Duplicate merging defaults on and affects display only. Installed copies are
+grouped by signed plugin ID while every action retains `sourceId:pluginId`.
+The default source is an explicit saved choice or the oldest installation, never
+the mirror with the highest version. An unavailable default requires explicit
+source selection; search and single-source filtering do not change the default.
+Version floors and approved permissions remain source-specific. The strictest
+known NSFW classification among installed sources applies to all copies.
+
+Installation requires explicit permission review. Install stays on the management
+page and closes the verification session; Install and browse reuses that verified
+session for the works catalog. Opening still fetches and verifies a signed remote
+manifest, but content-addressed modules can reuse Wasmline's hash-checked artifact
+cache (128 MiB configured limit). Installation does not imply offline availability. The same installed release
+retains its original record and timestamp. Returning or replacing a load cancels
+obsolete work and closes acquired handles before another session is accepted.
+
+Predictive Back previews Reader -> details -> works catalog -> previous home page
+using the shared page transition. Cancellation retains the current navigation
+state; completion dispatches the existing Back action. Search and saveable list
+positions remain attached to their page keys. Android explicitly enables system
+predictive Back; the root home page does not intercept back-to-home. Gesture
+rendering/device behavior has not been exercised for this change.
+
+Images distinguish missing URLs, loading, HTTP/network failure, permission denial,
+format failure, size limits, and disconnected sessions. Covers use compact states;
+reader pages retain their page labels and individual retry/details actions.
+Diagnostics omit original exception text, request header values, credentials,
+paths, queries, and fragments. Debug image details additionally identify the typed
+host policy rejection and a validated rejected header name, without exposing its
+value. Live image requests have not been reproduced in this workspace.
+
+Android diagnostics follow the installed application's debuggable flag; iOS uses
+`Platform.isDebugBinary`. Desktop `:evilo-desktop:run` enables the development-only
+`evilo.debugDiagnostics` JVM property; packaged applications default to disabled.
+Browser launchers default to disabled and can explicitly use `WebApp(debugDiagnostics = true)`.
+Debug shows observed startup phase durations, retains them after opening via the
+browser toolbar's Info action, and exposes installation timings in plugin details.
+Release shows generic loading text and no timing controls. The signed loader does
+not expose individual crypto/runtime timestamps, so cached-module checks and
+runtime creation may share one measured phase.
 
 Users do not enter Ed25519 keys, key IDs, or individual WLM URLs. Installations
 require a compatible release, matching signed source provenance, the app authority
-signature, and explicit permission approval. Official review does not prove safety.
-Other authors may maintain JSON catalogs, but cannot supply trusted keys or grant
-themselves official certification.
+signature, and explicit permission approval. A valid signature does not prove safety.
+Other authors may maintain JSON catalogs, but cannot supply trusted keys. Catalogs
+use the same release-signature and permission requirements regardless of source.
 
 Image/text reading code is shared. Video URLs open externally after approval;
 custom playback headers are unsupported. Library/history, saved reading progress,
 downloads, cloud sync, login, and in-app video are not implemented.
 
-The bundled `plugin-repository/official.json` remains empty until actual reviewed
-signed packages and matching source archives are published. The default refresh
-URL is `https://raw.githubusercontent.com/crowforkotlin/evilo/main/plugin-repository/official.json`.
+The bundled `plugin-repository/plugin.json` remains empty until actual signed
+packages and matching source archives are published. The default refresh
+URL is `https://raw.githubusercontent.com/crowforkotlin/evilo/main/plugin-repository/plugin.json`.
 Pushing application or plugin source code does not publish an installable plugin
 package. SDK publication is configured, not established remotely.
 
@@ -129,31 +172,54 @@ The app installs releases from a published JSON catalog. A source repository
 homepage, individual `.wlm` or `.wasm` file, and signing key are not subscription
 addresses.
 
-1. Open Browse and tap the App Bar's `+` action to open Plugin Sources.
+1. Open Browse, tap the App Bar's Plugin Sources action, then Add plugin source.
 2. Enter the publisher's direct JSON catalog URL and tap Subscribe. Prefer HTTPS;
-   plain HTTP requires explicit cleartext consent.
-3. Select a content type supported by the plugin. NSFW entries remain hidden
-   unless their preference is enabled in More.
-4. Tap an uninstalled plugin row. Review the recommended version, actual source
-   links, and requested permissions, then tap Approve and Install. Use the gear
-   to choose another compatible version when needed.
-5. Tap the installed row to enter it directly. The gear manages updates and
-   uninstalling, not a repeated installation step. No WLM URL, key ID, or Ed25519
-   key is entered by the user.
+   plain HTTP requires explicit cleartext consent. This downloads metadata only,
+   without installing or executing the listed plugins.
+3. Open the source's catalog and select a supported content type. NSFW entries
+   remain hidden unless enabled in More -> Settings -> Browse and content.
+4. Open a plugin's details, select a compatible release, review its actual source
+   links and permissions, and approve installation. Install keeps this page;
+   Install and browse explicitly enters the works catalog after verification.
+5. Tap its installed Browse row to enter works directly. The separate Info button
+   manages versions, updates, permissions, source copies, and per-source uninstall.
+   No WLM URL, key ID, or Ed25519 key is entered by the user.
 
-The official source is already subscribed. An empty `official.json` means there
-are no official releases to install; refreshing an empty list does not create a
-plugin. The illustrative URLs in the catalog documentation are not installable
-releases.
+The built-in source is already subscribed and can be disabled. An empty
+`plugin.json` means there are no releases to install from it; refreshing an empty
+list does not create a plugin. Catalog filenames are unrestricted: `plugin.json`,
+`plugins.json`, another name, or an endpoint without a `.json` suffix is accepted
+when its response satisfies the catalog format. The illustrative URLs in the
+catalog documentation are not installable releases.
 
-A publisher must first export a package signed by the authority embedded in the
-app, its actual source archive, icon, and `plugins.json`. Host `manifest.wlm`, its
-content-addressed `artifacts/` directory, the source archive, icon, and catalog
-at directly accessible HTTP(S) URLs. The app rejects download redirects. Keep
-these files outside the host repository; only reviewed catalog metadata belongs
-in its official list. See the independent template's README for release export,
-and `docs/plugin-catalog.md` for the catalog contract. Without a published catalog
-and matching signed package, there is no usable installation address to enter.
+## Publish your own plugin source
+
+Host your catalog independently; no PR to evilo's bundled `plugin.json` is needed.
+Share its direct HTTP(S) URL for users to subscribe through Plugin Sources. The
+smallest valid source is:
+
+```json
+{
+  "name": "My plugins",
+  "plugins": []
+}
+```
+
+For a nonempty source, write each plugin's stable ID, name, authors, introduction,
+kinds, languages, source repository, and common permissions once. Releases inherit the
+common fields unless overridden. Author names may be strings, icons are optional,
+dates accept `YYYY-MM-DD`, and current version/summary dates are derived. There
+is no `$schema` association or separate schema file to maintain. See
+[`docs/plugin-catalog.md`](docs/plugin-catalog.md) for the compact example and
+updating old releases without changing their permissions.
+
+The template's release exporter supplies a usable `plugins.json`, actual source
+archive/hash, signed `manifest.wlm`, and content-addressed `artifacts/` directory.
+Publish that output directly or copy its release metadata into your own catalog;
+do not invent hashes or source commits. All downloads must be served without
+redirects. Independent catalogs still require packages signed by the authority
+embedded in the app; they cannot add their own trusted keys. Keep provider code
+and artifacts outside evilo. See the template README for export commands.
 
 ## Configuration
 
@@ -164,7 +230,7 @@ and matching signed package, there is no usable installation address to enter.
 | `gradle.properties` | Gradle/Kotlin execution configuration |
 | `gradle/wrapper/gradle-wrapper.properties` | Gradle distribution/checksum |
 | `evilo-ios/Configuration/Config.xcconfig` | Apple signing and shared property mappings |
-| `plugin-repository/official.json` | Canonical bundled official catalog |
+| `plugin-repository/plugin.json` | Default bundled catalog, editable by publishers |
 
 `project.properties` remains plain Java/Xcode-compatible `KEY=value` assignments.
 Dependency versions are not duplicated in module scripts. `wasmline.localPath`
@@ -227,6 +293,11 @@ compatible versions, and mandatory updates. The host checks signed revision/hash
 consistency, not archive contents or reproducible builds. Current upstream does
 not expose guest execution-fuel or linear-memory limits.
 
+The requirement-to-source/test ledger is
+[`docs/browse-plugin-plan-progress.md`](docs/browse-plugin-plan-progress.md).
+It separates code and test sources from unexecuted tests, builds, visual checks,
+and the unconfirmed image root cause.
+
 ## Manual commands
 
 These are instructions, not execution records. Builds, tests, packaging, servers,
@@ -244,7 +315,7 @@ requests. Authorizing an APK build/install does not authorize other targets or t
 | iOS simulator framework | `./gradlew :evilo-app:linkDebugFrameworkIosSimulatorArm64` on macOS |
 | Protocol/model tests | `./gradlew :evilo-library:jvmTest` |
 | Catalog/storage/HTTP/runtime/controller tests | `./gradlew :evilo-core:jvmTest` |
-| Image decoder tests | `./gradlew :evilo-app:jvmTest` |
+| Image decoder, request approval, and image-scope tests | `./gradlew :evilo-app:jvmTest` |
 
 Android needs the configured SDK and JDK. iOS uses
 `evilo-ios/iosApp.xcodeproj`; its build phase invokes
@@ -253,11 +324,12 @@ restrictions; no server or proxy is started automatically.
 
 The old `:app:android` task and preview signing properties are obsolete. Use the
 independent plugin repository's README for signing/export. Do not publish stale
-binaries, assign invented source commits/URLs, or claim official review before
-the actual release and source have been reviewed/published.
+binaries, assign invented source commits/URLs, or describe unpublished packages
+as installable releases.
 
 ## Project instructions
 
-Project rules remain in `.agents/skills/evilo/` and its module guide. Comments and
-repository docs are English; user replies use the user's language. Report source
-changes separately from observed builds, installs, runtime behavior, and tests.
+Project rules remain in `.agents/skills/evilo/`, with module/configuration and
+architecture/framework guides. Comments and repository docs are English; user
+replies use the user's language. Report source changes separately from observed
+builds, installs, runtime behavior, and tests.

@@ -15,7 +15,9 @@ import kotlinx.coroutines.withContext
 class EviloPreferencesRepository(private val dataStore: DataStore<EviloPreferences>) {
     private val locks = StoreLock()
     private val pluginLocks = mutableMapOf<String, Mutex>()
-    val settings = dataStore.data.map { EviloSettings(it.selectedKind, it.showNsfw) }.distinctUntilChanged()
+    val settings = dataStore.data.map {
+        EviloSettings(it.selectedKind, it.showNsfw, it.mergeDuplicatePlugins, it.preferredInstallations)
+    }.distinctUntilChanged()
 
     suspend fun currentSettings(): EviloSettings = settings.first()
 
@@ -25,6 +27,34 @@ class EviloPreferencesRepository(private val dataStore: DataStore<EviloPreferenc
 
     suspend fun setShowNsfw(show: Boolean) {
         dataStore.updateData { it.copy(showNsfw = show) }
+    }
+
+    suspend fun setMergeDuplicatePlugins(merge: Boolean) {
+        dataStore.updateData { it.copy(mergeDuplicatePlugins = merge) }
+    }
+
+    suspend fun setPreferredInstallation(pluginId: String, key: String) {
+        require(validPreferredInstallations(mapOf(pluginId to key))) { "Invalid preferred plugin installation." }
+        dataStore.updateData { current ->
+            val values = current.preferredInstallations + (pluginId to key)
+            require(validPreferredInstallations(values)) { "Too many preferred plugin installations." }
+            current.copy(preferredInstallations = values)
+        }
+    }
+
+    suspend fun pinDefaultInstallations(values: Map<String, String>, installedPluginIds: Set<String>? = null) {
+        require(validPreferredInstallations(values)) { "Invalid default plugin installations." }
+        dataStore.updateData { current ->
+            val next = values + current.preferredInstallations.filterKeys { installedPluginIds == null || it in installedPluginIds }
+            require(validPreferredInstallations(next)) { "Too many preferred plugin installations." }
+            current.copy(preferredInstallations = next)
+        }
+    }
+
+    suspend fun retainPreferredInstallations(pluginIds: Set<String>) {
+        dataStore.updateData { current ->
+            current.copy(preferredInstallations = current.preferredInstallations.filterKeys { it in pluginIds })
+        }
     }
 
     fun pluginSession(pluginId: String): PluginStorageSession =

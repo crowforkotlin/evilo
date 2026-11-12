@@ -40,4 +40,11 @@ data class MediaBrowserState(
     val chapterIndex: Int? = null,
     val content: MediaContent? = null,
     val error: String? = null,
-)
+) {
+    /** A renderable back destination, without cancelling work or publishing navigation. */
+    fun backDestination(): MediaBrowserState? = when (page) {
+        MediaBrowserPage.CATALOG -> null
+        MediaBrowserPage.DETAILS -> copy(page = MediaBrowserPage.CATALOG, selectedItem = null, chapters = emptyList(), busy = false, error = null)
+        MediaBrowserPage.READER -> copy(page = MediaBrowserPage.DETAILS, chapterIndex = null, content = null, busy = false, error = null)
+    }
+}

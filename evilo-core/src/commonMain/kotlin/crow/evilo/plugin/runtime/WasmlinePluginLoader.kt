@@ -19,7 +19,6 @@ import crow.wasmline.bind
 import crow.wasmline.link
 import crow.wasmline.loader.WasmlineLoadOptions
 import crow.wasmline.loader.WasmlineLoader
-import crow.wasmline.loader.WasmlineNoOpCache
 import crow.wasmline.loader.WasmlineSource
 import crow.wasmline.loader.model.SignedManifestEnvelope
 import crow.wasmline.loader.model.WasmlineManifest
@@ -41,8 +40,9 @@ class WasmlinePluginLoader(
         expected: PluginDescriptor,
         sourceRevision: String,
         sourceArchiveSha256: String,
+        onNegotiating: suspend () -> Unit = {},
     ): MediaSource {
-        require(options.trustedKeys != null && options.cache == WasmlineNoOpCache && options.manifestTtlMs == 0L) {
+        require(options.trustedKeys != null && options.manifestTtlMs == 0L) {
             "Plugin loads require explicit trusted keys and a freshly verified manifest."
         }
         val network = requireNotNull(options.networkClient) { "A policy-approved package network client is required." }
@@ -54,6 +54,7 @@ class WasmlinePluginLoader(
             is WasmlineLoadResult.Failure -> throw SourcePluginLoadException(result.failure)
         }
         try {
+            onNegotiating()
             wasmline.bind(EviloHostService::class, PluginHostStorageService(expected.id, grantedHost, store, expected.permissions.storage))
             val service = wasmline.link<EviloPluginService>()
             val descriptorJson = service.describe()

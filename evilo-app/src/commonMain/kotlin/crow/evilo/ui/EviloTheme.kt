@@ -98,6 +98,7 @@ private val DarkColors = darkColorScheme(
     scrim = Color.Black,
 )
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun EviloTheme(darkTheme: Boolean = isSystemInDarkTheme(), content: @Composable () -> Unit) {
     val font = Font(Res.font.ChillRoundMSemiBold, weight = FontWeight.SemiBold)
@@ -105,6 +106,7 @@ fun EviloTheme(darkTheme: Boolean = isSystemInDarkTheme(), content: @Composable 
     val typography = remember(family) { eviloTypography(family) }
     MaterialTheme(
         colorScheme = if (darkTheme) DarkColors else LightColors,
+        motionScheme = EviloMotion.Scheme,
         typography = typography,
         shapes = Shapes(
             extraSmall = RoundedCornerShape(EviloRadius.ExtraSmall),

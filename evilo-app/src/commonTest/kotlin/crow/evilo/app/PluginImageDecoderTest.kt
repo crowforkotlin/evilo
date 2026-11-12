@@ -1,10 +1,30 @@
 package crow.evilo.app
 
+import crow.evilo.feature.reader.PluginImageFormatException
+import crow.evilo.feature.reader.PluginImageLimitException
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertSame
 
 class PluginImageDecoderTest {
+    @Test
+    fun platformDecodeFailuresHaveAFormatCategoryWithoutMatchingExceptionMessages() = runTest {
+        val original = IllegalArgumentException("Invalid pixel data.")
+        val failure = assertFailsWith<PluginImageFormatException> { decodePluginImage { throw original } }
+        assertSame(original, failure.cause)
+    }
+
+    @Test
+    fun decodingDoesNotConvertCancellationOrLimitFailuresIntoFormatErrors() = runTest {
+        val cancellation = CancellationException("Leaving the reader.")
+        assertSame(cancellation, assertFailsWith<CancellationException> { decodePluginImage { throw cancellation } })
+        val limit = PluginImageLimitException(maxDimension = 512, maxPixels = 262_144)
+        assertSame(limit, assertFailsWith<PluginImageLimitException> { decodePluginImage { throw limit } })
+    }
+
     @Test
     fun readsPngDimensionsWithoutDecodingPixels() {
         val header = byteArrayOf(
@@ -56,6 +76,25 @@ class PluginImageDecoderTest {
     fun unknownOrTruncatedImageHeadersAreRejected() {
         assertFailsWith<IllegalStateException> { pluginImageDimensions("not an image".encodeToByteArray()) }
         assertFailsWith<IllegalStateException> { pluginImageDimensions(byteArrayOf(0xff.toByte(), 0xd8.toByte(), 0xff.toByte(), 0xc0.toByte(), 0, 8)) }
+    }
+
+    @Test
+    fun unsupportedFormatsAndInvalidDimensionsHaveFormatFailures() {
+        for (header in listOf("GIF89a", "<svg></svg>", "<html>Denied</html>", "AVIF"))
+            assertFailsWith<PluginImageFormatException> { pluginImageDimensions(header.encodeToByteArray()) }
+        assertFailsWith<PluginImageFormatException> { requirePluginDimensions(0, 512, 512, 262_144) }
+        assertFailsWith<PluginImageFormatException> { requirePluginDimensions(-1, 512, 512, 262_144) }
+    }
+
+    @Test
+    fun iconAndMediaLimitsRemainSeparateAndCheckTotalPixels() {
+        requirePluginDimensions(512, 512, 512, 262_144)
+        val icon = assertFailsWith<PluginImageLimitException> { requirePluginDimensions(513, 512, 512, 262_144) }
+        assertEquals(512, icon.maxDimension)
+        assertEquals(262_144L, icon.maxPixels)
+        val media = assertFailsWith<PluginImageLimitException> { requirePluginDimensions(8192, 8192, 16_384, 33_554_432) }
+        assertEquals(16_384, media.maxDimension)
+        assertEquals(33_554_432L, media.maxPixels)
     }
 
     private fun webpHeader(chunk: String): ByteArray = ByteArray(30).also { header ->

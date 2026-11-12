@@ -76,13 +76,7 @@ class MediaBrowserController(private val session: MediaSourceSession, kind: Medi
         }
     }
 
-    private fun back() = replace(busy = false, begin = {
-        when (it.page) {
-            MediaBrowserPage.CATALOG -> it
-            MediaBrowserPage.DETAILS -> it.copy(page = MediaBrowserPage.CATALOG, selectedItem = null, chapters = emptyList())
-            MediaBrowserPage.READER -> it.copy(page = MediaBrowserPage.DETAILS, chapterIndex = null, content = null)
-        }
-    }) {}
+    private fun back() = replace(busy = false, begin = { it.backDestination() ?: it }) {}
 
     override suspend fun close() = withContext(NonCancellable) {
         if (closed) return@withContext

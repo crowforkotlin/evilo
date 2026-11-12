@@ -1,6 +1,6 @@
 ---
 name: evilo
-description: Maintain the evilo Kotlin Multiplatform media reader, shared UI, and Wasmline plugin SDK/runtime. Use for evilo module, protocol, Compose, Gradle, catalog, storage, and platform-entrypoint changes. This skill does not authorize upstream Wasmline edits or automatic validation.
+description: Maintain evilo's Kotlin Multiplatform/Compose application architecture and Wasmline plugin SDK/runtime. Use for shared features, framework integration, dependency wiring, catalogs, persistence, Gradle, and platform launchers. This skill does not authorize upstream Wasmline edits or automatic validation.
 ---
 
 # evilo development
@@ -34,6 +34,19 @@ The SDK is maintained once in evilo, not copied into each provider.
 The common app code supplies Browse/More, JSON sources, and image/text viewing;
 library/history/downloads remain unimplemented. Distinguish code/configuration
 from observed builds, installs, signed loading, and runtime behavior.
+
+## Use the existing application frameworks
+
+Read [the architecture and framework guide](references/architecture-guide.md)
+when changing features, dependency injection, state, HTTP/images, storage, or
+resource lifetime. It names the implementing files and existing call sequences.
+
+Compose observes typed MVI stores in `evilo-core`; Koin owns dependencies in one
+isolated application context. Reuse the app-owned Ktor transport and permission-aware
+Coil loader. Keep settings/plugin KV in typed Protobuf DataStore and catalog records
+in Room3; KSP generates Room implementations. Framework versions belong only in
+`gradle/libs.versions.toml`. Read `docs/design-system.md` before changing shared UI
+tokens or navigation; do not replace the established MD3 theme or font.
 
 ## Locate code
 
@@ -71,6 +84,34 @@ explicitly. Do not copy upstream sample trust keys. When implementing HTTP,
 enforce host-approved URL/redirect and credential policies and response limits;
 a plugin signature is not network authorization. Do not claim browser CORS can
 be bypassed with Wasm.
+
+## Maintain catalog JSON
+
+Read [the catalog contract](../../../docs/plugin-catalog.md) for metadata and
+release changes. Publishers may host their own catalog without a PR to evilo;
+`plugin-repository/plugin.json` is only the bundled source. Filenames and `.json`
+suffixes are not required. The public format needs no separate JSON Schema.
+
+Keep common kinds, languages, source URL, permissions, and protocol declarations
+once per plugin. Releases inherit omitted fields; explicit overrides replace the
+whole field, never merge it. String authors, optional icons, ordinary dates, and
+derived version/date summaries are supported by `CatalogJson.kt` before typed
+decoding in `CatalogParser`. Preserve full legacy input and explicit metadata;
+defaults must be deterministic. Never invent release revisions, source archives,
+or hashes to reduce authoring work; use actual release export results.
+
+Catalogs carry no review/certification state. Browse shows installed plugins only;
+All/Installed filters belong to source catalogs. Info opens plugin details without
+connecting a works session. Duplicate merging is display-only, defaults on, and
+keeps source-qualified installation keys and explicit/oldest default source choices.
+Do not silently switch sources or compare mirror versions to choose a default.
+Independent sources cannot add trusted signing keys; install/update still requires
+the app authority's signed releases and explicit permission approval. Changing
+common defaults must not silently alter approved installation permissions.
+The built-in subscription can be disabled, not removed. Every mandatory version
+floor is scoped to its subscription, including the built-in one. Preserve the
+existing Room record migration when renaming bundled source IDs or URLs; do not
+discard caches, installation timestamps, disabled state, or plugin KV.
 
 ## Configuration and platform work
 

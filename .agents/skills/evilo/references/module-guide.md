@@ -19,7 +19,7 @@ module naming used by Wasmline, with explicit Gradle settings includes.
 shared application modules; features are packages, not Gradle projects.
 Platform launchers call the same `App()`; they do not copy page implementations.
 `evilo-app` owns all Compose screens, MD3 theme/font/layout dimensions, generated
-resources, and image decoding. Browse/More, source/permission sheets, the reader,
+resources, and image decoding. Browse/More, settings/source/detail pages, confirmation dialogs, the reader,
 and the existing unconnected library screen all live there. `evilo-core` owns
 catalogs, HTTP, persistence, signed loading, sessions, and reader/app controllers.
 Sessions return bytes so host logic never depends on Compose. The library-screen
@@ -70,6 +70,11 @@ only. Koin supplies one app-owned Ktor transport, the common MVI stores, and the
 Coil loader. Core stores expose `StateFlow` plus typed `dispatch(intent)`; Compose
 pages do not construct repositories or clients.
 
+For framework-specific implementation files, feature edits, and resource
+lifetime, read [the architecture guide](architecture-guide.md). It covers Compose
+MD3, MVI/coroutines, isolated Koin, Coil/Ktor, DataStore/Room3, KSP, and browser
+storage without duplicating dependency versions.
+
 DataStore stores typed Protobuf settings and plugin KV; Room3 stores subscriptions,
 catalog caches, installations, mandatory floors, and pending KV deletions. KSP
 generates Room implementations for all configured targets. Platform bindings use
@@ -88,7 +93,7 @@ provided. See `docs/application-architecture.md` for API and worker setup detail
 - App identity/version/iOS deployment: Java/Xcode-compatible `project.properties`.
 - Execution settings: `gradle.properties`, wrapper, and daemon files.
 - Protocol major/minor/capabilities: `evilo-library`, not app release properties.
-- Catalog parser/official URL: `evilo-core`; bundled JSON/schema: `plugin-repository`.
+- Catalog normalization/parser/default URL: `evilo-core`; bundled `plugin.json`: `plugin-repository`.
 - Authority: `:evilo-app:generatePluginSigningKeys` and external `evilo.signingKeyDirectory`.
 - Runtime permissions: reviewed per-release origins/methods/headers/storage and HTTP consent.
 
@@ -99,7 +104,7 @@ substitute `-Pevilo.sdkPath=../evilo`; never copy models/service interfaces.
 Register modules explicitly and use type-safe `projects.evilo*` accessors. Apply
 serialization for serialized models, and the Wasmline compiler plugin where typed
 services are bound/linked. Public contracts use `api`; hidden dependencies use
-`implementation`. The official catalog is generated from one root JSON file;
+`implementation`. The bundled catalog is generated from one root JSON file;
 font/theme resources live in `evilo-app`, not duplicate platform resource trees.
 All UI resources use `crow.evilo.app.resources`. Both app configuration and the
 bundled catalog generation tasks are registered in `evilo-app`.
@@ -124,7 +129,7 @@ app's installable protocol. Optional fields do not change bridge signatures.
 Keep one Ed25519 authority across an app release family and its updates. The app
 embeds public material only; templates cannot generate replacement keys. Private
 keys stay outside repos, resources, source ZIPs, and catalogs. Users/catalogs cannot
-supply trust keys. Review/signing does not prove network or execution safety.
+supply trust keys. Signing does not prove network or execution safety.
 
 Use signed remote manifests and explicit package/network policies. Do not accept
 raw modules through UI, copy sample trust keys, grant wildcard origins, or claim

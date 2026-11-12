@@ -4,7 +4,7 @@ import coil3.PlatformContext
 import crow.evilo.architecture.closeResources
 import crow.evilo.di.eviloCoreModule
 import crow.evilo.di.eviloUiModule
-import crow.evilo.feature.browse.BundledOfficialCatalogJson
+import crow.evilo.feature.browse.BundledPluginCatalogJson
 import crow.evilo.feature.browse.PluginHomeStore
 import crow.evilo.network.ktor.BoundedHttpTransport
 import crow.evilo.plugin.api.HOST_HTTP_CAPABILITY
@@ -48,7 +48,8 @@ internal class AppEnvironment private constructor(
     }
 
     companion object {
-        suspend fun create(factory: AppStorageFactory, context: PlatformContext, parentScope: CoroutineScope): AppEnvironment {
+        suspend fun create(factory: AppStorageFactory, context: PlatformContext, parentScope: CoroutineScope,
+            debugDiagnostics: Boolean = false): AppEnvironment {
             val lifetime = SupervisorJob(parentScope.coroutineContext[Job])
             val scope = CoroutineScope(parentScope.coroutineContext + lifetime)
             var storage: AppStorage? = null
@@ -67,13 +68,13 @@ internal class AppEnvironment private constructor(
                         GeneratedEviloConfiguration.PLUGIN_PUBLIC_KEY_HEX.hexToByteArray() else null
                 }
                 val container = koinApplication {
-                    modules(eviloCoreModule(host, trustedKeys, backend.preferences, backend.catalogs, scope), eviloUiModule(context))
+                    modules(eviloCoreModule(host, trustedKeys, backend.preferences, backend.catalogs, scope, debugDiagnostics), eviloUiModule(context))
                 }.also { application = it }
                 val http = container.koin.get<BoundedHttpTransport>().also { transport = it }
                 val imageLoader = container.koin.get<EviloImages>().also { images = it }
                 val controller = container.koin.get<AppPluginController>().also { connections = it }
                 val homeStore = container.koin.get<PluginHomeStore>().also { home = it }
-                container.koin.get<PluginCatalogRepository>().initialize(BundledOfficialCatalogJson)
+                container.koin.get<PluginCatalogRepository>().initialize(BundledPluginCatalogJson)
                 currentCoroutineContext().ensureActive()
                 return AppEnvironment(container, homeStore, controller, imageLoader, http, backend, lifetime)
             } catch (failure: Throwable) {

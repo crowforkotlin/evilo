@@ -48,7 +48,7 @@ catalog repository, session factory, connection controller, and home store.
 kind, not an application singleton.
 
 Initialization loads Room records, retries pending plugin-data deletions, reads
-preferences, and initializes the bundled official catalog. Non-preview startup
+preferences, and initializes the bundled plugin catalog. Non-preview startup
 then dispatches `PluginHomeIntent.Refresh`. Compose previews use explicit memory
 stores; production startup never silently switches to them after an error.
 Startup failures show their message and a retry action.
@@ -83,10 +83,10 @@ fun CatalogRefreshAction() {
     val store = koinInject<PluginHomeStore>()
     val state by store.state.collectAsState()
     Button(
-        enabled = !state.busy,
+        enabled = !state.catalog.refreshing,
         onClick = { store.dispatch(PluginHomeIntent.Refresh) },
     ) {
-        Text("Refresh (${state.catalog.listings.size})")
+        Text("Refresh (${state.catalog.subscriptions.count { it.enabled }} sources)")
     }
 }
 ```
@@ -95,17 +95,32 @@ Production labels use Compose string resources. Pages must not create
 repositories, clients, databases, or private coroutine scopes for these actions.
 Local unsubmitted form text and version selection may remain Compose state.
 
-- `PluginHomeStore` owns navigation, search/filter state, action status/errors,
-  and the single `HomeOverlay`. Permission, source, settings, and uninstall
-  windows replace one another instead of stacking modals.
-- `AppPluginController` owns installing/opening/closing signed media sessions.
-  Approval rechecks the exact reviewed release against the current catalog.
+- `PluginHomeStore` owns the Browse/More destination, typed `HomePage` return stack,
+  local/source search and filtering, display projections/counts, mutation status,
+  and one `HomeOverlay`. Sources/settings/details are pages; temporary selectors
+  and permission/source-removal/uninstall confirmations replace one another.
+  Catalog checks have a separate operation scope, so local search and navigation
+  remain usable while refresh runs. Returning from Add Source or source selection
+  cancels obsolete navigation-producing work, not unrelated preference commits.
+- `AppPluginController` owns installing/opening/closing signed media sessions and
+  reports precheck, package verification, negotiation, and installation-recording
+  phases. Approval rechecks the exact reviewed release against the current catalog.
+  Install-only records then closes the verification session; install-and-browse
+  retains it. Explicit source persistence is part of the cancellable open operation,
+  with installation/kind/blocking checks before an active session is published.
 - `MediaBrowserController` receives `MediaBrowserIntent` for search, pagination,
   details, chapters, retry, and back. Its route closes the controller/session and
-  image scope when it leaves composition.
+  image scope when it leaves composition. `MediaBrowserState.backDestination()`
+  supplies the same previous-page snapshot to both preview and committed Back.
+  Shared `EviloPredictiveBackHandler` collects gesture progress and seeks an
+  `EviloPageTransition` through `SeekableTransitionState`. It does not dispatch
+  intents while swiping; cancellation restores the page and completion commits
+  Back only if the navigation key still matches. Catalog Back delegates to the
+  home handler, and the root does not intercept system exit.
 - `LatestOperation` cancels obsolete jobs and waits for their operation mutex
   before replacements execute. Generation checks prevent old failure/finalization
-  callbacks from changing the new operation's state.
+  callbacks from changing the new operation's state. Explicit `cancel()` preserves
+  cleanup ordering while suppressing obsolete return/error callbacks.
 
 Call `dispatch()` on the application's UI dispatcher. Controllers inherit that
 dispatcher; their lifecycle fields are not a general concurrent API. Network,
@@ -119,6 +134,32 @@ in `eviloCoreModule()`, and add its Compose route in `evilo-app`. Reuse
 feature module or duplicate platform pages. The component rules are in
 [design-system.md](design-system.md).
 
+## Installed Browse and source management
+
+`BrowseProjection.kt` computes display-only rows from source-qualified installation
+records. It checks installed-release kinds, enabled sources, conservative installed
+NSFW classifications, the explicit source filter, and duplicate preferences before
+matching the localized displayed name/source/tags. Search does not choose another
+source. All-sources merging uses a saved installation key or the chronological
+oldest installation with subscription order as a tie-breaker. An unavailable
+default produces a source-selection row rather than automatic fallback.
+
+Every open/update/uninstall still uses `sourceId:pluginId`; raw installation
+management never merges records or limits them to the selected media kind.
+Source catalogs retain All/Installed filtering and show uninstalled releases.
+`refresh(sourceId)` records independent source results and keeps failed-source
+caches without relabeling other successful checks. `lastSuccessAt` is session
+state, separate from the publisher's catalog date; no Room column was added.
+
+Compose's saveable state holders retain owning-page list/grid positions and local
+input. Media details/back keep catalog results in `MediaBrowserController` rather
+than executing another search. Media-route state belongs to its session; closing
+the browser removes its saved page state so a newly opened empty-query catalog
+cannot restore text/results from an old session. App Bar/system/Escape return handling closes the
+current confirmation or nested reader page before leaving the works session.
+Source removal, uninstall, media-kind changes, and newly hidden NSFW routes cannot
+retain an active browser for an invalid installation.
+
 ## HTTP and image requests
 
 `BoundedHttpTransport` owns the application Ktor client. Native clients use
@@ -127,8 +168,8 @@ Catalog, package, plugin API, and image requests all pass through bounded
 transport and their corresponding URL/permission policies. Requests reject
 redirects and implicit credentials. Signatures are not network authorization.
 
-`EviloImages` configures Coil with permission-aware request models and a custom
-fetcher. Plugin images call `MediaSourceSession.imageBytes()`; catalog icons call
+`EviloImages` configures Coil with permission-aware request models, a custom
+fetcher, and `PluginImageDecoderFactory`. Plugin images call `MediaSourceSession.imageBytes()`; catalog icons call
 the same Ktor transport. Pages do not pass arbitrary URL strings to an automatic
 Coil network component. Service-loader components and disk/weak-reference caching
 are disabled; the shared memory cache is limited to 32 MiB.
@@ -136,17 +177,32 @@ are disabled; the shared memory cache is limited to 32 MiB.
 An interceptor approves the URL/session before cache access and again before
 returning a result. Cache keys hash approved URL/headers and use separate catalog
 and per-session prefixes. `SessionImages.close()` immediately invalidates the
-session's image scope and evicts its entries. JPEG/PNG/WebP headers and dimensions
+session's image scope, cancels supervised in-flight requests, publishes disconnection,
+and evicts its entries. Retry attempts bypass memory-cache reads without changing
+the approved URL/header key; blank URLs have no request. JPEG/PNG/WebP headers and dimensions
 are checked before Coil decodes: icons have 1 MiB/512/262,144-pixel limits; media
 has 16 MiB/16,384/33,554,432-pixel limits. Remote SVG is unsupported.
+
+Platform decoder failures after header validation become typed format errors;
+cancellation and limits retain their types. `NetworkFailures.kt` and
+`ImageFailure.kt` preserve actual HTTP statuses/limits and distinguish policy,
+network, redirect, format, and session failures without exception-string matching.
+`EviloAsyncImage` separates icon/cover/reader presentations. Its diagnostic dialog
+omits exception messages and all request data except a redacted HTTP(S) origin;
+copy uses only those safe fields. Cover headers still use an empty map. Any SDK
+cover-header extension requires a real failure sample and a protocol decision.
 
 ## DataStore and synchronous plugin KV
 
 `EviloPreferences` is a typed Protobuf model. `EviloPreferencesCodec` validates
-schema version 1 and nonnegative namespace revisions, and limits the serialized
+schema version 1, nonnegative namespace revisions, and bounded preferred-installation
+IDs/keys, and limits the serialized
 file to 32 MiB. Malformed or unsupported data raises `CorruptionException`; there
 is no automatic reset handler. `EviloPreferencesRepository` supplies selected
-media kind, NSFW preference, and plugin storage sessions.
+media kind, NSFW and duplicate-display preferences, default installation choices,
+and plugin storage sessions. Existing Protobuf fields 1..4 are unchanged;
+`mergeDuplicatePlugins` and `preferredInstallations` use fields 5 and 6 with
+deterministic defaults. Failed preference writes leave the published value unchanged.
 
 Wasmline services stay synchronous. Do not add `suspend`, overloads, generics, or
 new bridge signatures to make DataStore calls from a guest. The existing host
@@ -181,11 +237,25 @@ deletions. Version codes are indexed as decimal text because the current SQLite
 Web driver transports numbers through JavaScript doubles; installation JSON is
 checked against its indexed identity and version.
 
+`PluginCatalogRepository.initialize()` renames the previous built-in source to
+`bundled` and updates its default URL, cache key/display metadata, installation
+source fields, and scoped floor keys within the existing Room records. The
+installation release/time, disabled state, and plugin KV are retained. This is
+not a migration from the removed JSON/localStorage storage implementations.
+
 `PluginCatalogRepository` validates catalog/release metadata before mutations.
 Room writes complete before new repository state is published. Once a mutation's
 commit begins, cancellation cannot interrupt the commit/publication pair and
 leave the live state behind durable records. An identical installed release
 retains its original record and timestamp.
+
+Before disabling/removing/uninstalling or replacing the release of an implicit
+duplicate default, the repository
+pins that installation key in DataStore so display cannot silently move to another
+source. A replacement's new installation timestamp cannot change that default.
+Removed-source preference tombstones remain while another installed copy
+exists, requiring explicit selection; preferences are pruned only when no copy of
+that signed ID remains. This does not alter Room installation keys or merge floors.
 
 Room and DataStore do not share a transaction. Last-installation uninstall first
 atomically removes the installation and records pending KV deletion in Room,

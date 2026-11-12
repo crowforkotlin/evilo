@@ -51,4 +51,5 @@ object EviloLayout {
     val NavigationLabelOffset = 72.dp
     val PermissionContentMaxHeight = 440.dp
     val SheetMaxWidth = 640.dp
+    val ToastMaxWidth = 480.dp
 }

@@ -1,8 +1,14 @@
 package crow.evilo.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -51,8 +57,12 @@ internal fun EviloSearchField(
         placeholder = { Text(hint, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         leadingIcon = { Icon(EviloIcons.Search, null) },
         trailingIcon = {
-            if (value.isNotEmpty()) IconButton(onClick = { onValueChange("") }, enabled = enabled) {
-                Icon(EviloIcons.Close, stringResource(Res.string.home_clear_search))
+            AnimatedVisibility(value.isNotEmpty(),
+                enter = fadeIn(EviloMotion.componentSpec()) + scaleIn(EviloMotion.componentSpec(), initialScale = 0.92f),
+                exit = fadeOut(EviloMotion.exitSpec()) + scaleOut(EviloMotion.exitSpec(), targetScale = 0.92f)) {
+                IconButton(onClick = { onValueChange("") }, enabled = enabled && value.isNotEmpty()) {
+                    Icon(EviloIcons.Close, stringResource(Res.string.home_clear_search))
+                }
             }
         },
         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
@@ -123,5 +133,17 @@ internal fun EviloSettingContent(
             Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         trailingContent?.invoke()
+    }
+}
+
+@Composable
+internal fun EviloSettingsGroup(title: String, modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    Surface(modifier, shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(EviloLayout.BorderWidth, MaterialTheme.colorScheme.outlineVariant)) {
+        Column(Modifier.fillMaxWidth()) {
+            Text(title, Modifier.padding(start = EviloSpacing.Large, end = EviloSpacing.Large, top = EviloSpacing.Large),
+                style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+            content()
+        }
     }
 }

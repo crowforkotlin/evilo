@@ -69,32 +69,39 @@ This is an application-release authority, not a different key for every phone.
 Per-installation keys could not verify the same publicly distributed package.
 Release builders must preserve the authority pair across application releases.
 Independent developers submit source and artifacts to the authority operator for
-review/signing; the private key must not be shared or committed. A development
+signing; the private key must not be shared or committed. A development
 build using another authority cannot load packages from the release authority.
 
-Certification is a claim about review/source provenance, not a claim that code
-is harmless. Only entries from the built-in official source may display official
-certification. A custom catalog cannot self-certify or grant network/storage
-access. Installation shows the permissions and requires explicit consent even
-for officially certified plugins.
+A valid signature identifies the signing authority; it does not prove that code
+is harmless. Catalog metadata cannot grant network/storage access. Every
+installation shows the release's permissions and requires explicit consent.
 
 ## Catalogs and releases
 
-The application bundles `plugin-repository/official.json`. Adding a source only
-requires its JSON URL. Catalogs describe authors, region, languages, media kinds,
-NSFW status, introduction, icon, creation/update dates, source repository and
-release revision, available versions, compatibility, and forced updates. Each
-release has its own media kinds and languages. Every release supplies a `.wlm`
-URL, immutable source revision, source snapshot/archive URL, and archive SHA-256. A
-link
-ending in a Wasm binary or manifest is not accepted as a source-code link.
+The application bundles `plugin-repository/plugin.json`. Adding a source only
+requires a URL whose response is catalog JSON; filenames and a `.json` suffix
+are not required. Publishers may host independent sources without a PR to evilo.
+The root only needs `name` and `plugins`; no external JSON Schema is used.
+Catalogs describe authors, region, languages, media kinds, NSFW, introduction,
+optional icon, source repository, releases, compatibility, and forced updates.
+`CatalogJson.kt` expands common plugin fields into releases and derives omitted
+version/date summaries before `CatalogParser` validates the full typed metadata.
+Authors may be strings and dates may use `YYYY-MM-DD`.
 
-The bundled official catalog starts empty until an actual signed package and its
-matching source release are published. No guessed release URL or unreviewed
-example is labeled official. The template exports a full catalog entry together
+Each release inherits omitted kinds, languages, source URL, permissions, and
+protocol; explicit overrides replace whole fields. Every release supplies a
+`.wlm` URL, immutable source revision, actual source archive URL/hash, version/code,
+and publication date. A source URL may inherit the repository link or override
+it with an immutable snapshot. A link ending in a Wasm binary or manifest is not
+accepted as a source-code link. Changing defaults can change older inherited
+release metadata; approved installation permissions are never silently replaced.
+
+The bundled catalog starts empty until an actual signed package and its
+matching source release are published. No guessed release URL is presented as an
+installable package. The template exports a full catalog entry together
 with a source archive when the publisher supplies real release URLs.
-`docs/plugin-catalog.md` and `plugin-repository/catalog.schema.json` document the
-format. The signed manifest binds the runtime descriptor, source revision, and
+`docs/plugin-catalog.md` documents independent hosting and the compact format.
+The signed manifest binds the runtime descriptor, source revision, and
 archive hash. An identity-checking network wrapper compares those declarations
 before Wasmline creates the runtime; unchanged bytes still undergo upstream
 signature/artifact-hash verification. The wrapper is not a signature verifier.
@@ -102,16 +109,16 @@ Source-link availability, archive contents, and reproducible builds still requir
 publisher review; the host does not inspect source archives automatically.
 
 JSON is not trusted code. Unknown optional fields permit catalog evolution;
-unknown schema versions, invalid URLs, duplicate IDs/version codes, binary-only
+unknown format versions, invalid URLs, duplicate IDs/version codes, binary-only
 source links, and inconsistent releases are rejected. Revoked/unusable versions
 known to the current catalog cannot be opened. A forced update blocks older
 installations; an incompatible
 mandatory release requires an application update rather than falling back to an
 older version. Failed refreshes preserve prior data and display the failure.
-Known minimum version floors are persisted monotonically. Official floors also
-apply across other subscriptions for the same signed plugin ID, even when the
-official source is disabled. Custom floors stay scoped to their source to avoid
-blocking unrelated subscriptions. Removing a custom source removes its cache,
+Known minimum version floors are persisted monotonically and stay scoped to
+their source. A built-in source's floor does not block copies of the same signed
+plugin ID in other subscriptions. The built-in source can be disabled, not
+removed. Removing a custom source removes its cache,
 installations, and scoped floors, but preserves plugin data. An uninstall erases
 plugin data only after its last installation across subscriptions is removed.
 
@@ -131,8 +138,11 @@ The host bounds catalog/manifest downloads at 2 MiB, artifacts at 64 MiB, API
 responses at 2 MiB, images at 16 MiB, and request bodies at 64 KiB. Requests have a
 30-second total timeout and at most four simultaneous exchanges in the one
 application-owned Ktor transport.
-Manifest caching is disabled; upstream Wasmline owns artifact staging/cache with
-a configured native cache limit of 128 MiB. Descriptors use upstream's default
+Manifest reuse is disabled (`manifestTtlMs = 0`); each open fetches a signed manifest
+and performs signature/descriptor checks. The loader's default artifact cache is
+enabled instead of `WasmlineNoOpCache`, with a configured native limit of 128 MiB.
+Cached artifacts are checked against the size and SHA-256 declared by the signed
+manifest before loading. This does not implement offline loading. Descriptors use upstream's default
 16 KiB metadata-string limit. Plugin steps are bounded at 4 MiB, continuation
 context at 128 KiB, HTTP exchanges at 512, chapters at 20,000, ordered images at
 2000, and streams at 32.
@@ -145,20 +155,26 @@ rechecks URL approval and session lifetime before memory-cache access and before
 returning a result. Media keys include a session-specific prefix and a hash of
 the approved URL/headers; closed sessions cannot reuse another session's cache.
 Unknown image models and automatic network components are disabled. Remote SVG
-is unsupported.
+is unsupported. `SessionImages.close()` cancels in-flight supervised image requests,
+evicts their scoped entries, and exposes disconnection to the page. Individual
+retry attempts bypass memory-cache reads while retaining approval checks; blank
+URLs have no request. Typed HTTP/policy/format/limit/session failures drive compact
+image states and redacted diagnostics without displaying original exception text.
+Platform decoder failures after header validation are format errors, not HTTP errors.
 
 The current upstream `WasmlineConfig` does not expose guest fuel, execution-time,
 or linear-memory budgets. HTTP/coroutine timeouts cannot interrupt a synchronous
 guest that loops or allocates excessively. Running native work off the UI thread
 does not remove this denial-of-service risk, and browsers may still block their
-main thread. Signing/certification must not be described as complete isolation.
+main thread. Signing must not be described as complete isolation.
 The initialization rule is a plugin-author contract, not proof that signed code
 is harmless.
 
 ## Storage and interface
 
-Host persistence stores source subscriptions, selected media kind, installations,
-and approvals. Plugin key/value storage is durable, isolated by signed plugin ID,
+Host persistence stores source subscriptions, selected media kind, NSFW/duplicate
+preferences, default installation choices, installations, and approvals.
+Plugin key/value storage is durable, isolated by signed plugin ID,
 bounded by key/value/count/total quotas, and available only after storage consent.
 It is not a credential vault or a filesystem API. Plugins cannot choose their
 namespace or access host preferences or another plugin's values.
@@ -202,23 +218,39 @@ cross-device synchronization are not implemented. Old JSON/localStorage formats
 are removed without migration; this is first-release development.
 
 The MD3 home has Browse and More destinations and a centered floating media-kind
-selector. Browse uses compact rounded rows and an App Bar source-management action.
-The selected media kind filters plugins; More contains installed plugins, source
-management, and safety information. Compact layouts use a bottom bar; expanded
-layouts use a navigation rail. History/library/updates may be added later without
-presenting fake data as implemented reader features.
-Clicking an installed row opens it directly; an uninstalled row reviews a
-compatible release before installation. The gear to the left of the rounded
-chevron manages versions, updates, and uninstalling. Descriptions do not expand.
-One `HomeOverlay` state replaces settings/permission/source/uninstall windows
-rather than stacking them. Approval rechecks the exact reviewed release, and a
-same-release installation preserves its original record and timestamp.
+selector. Browse contains source-grouped installed plugins, local search, source
+filtering, and one App Bar source-management action. Main row clicks open works
+directly; the independent Info action opens full details without loading a session.
+Source catalogs provide All/Installed filtering and first-install review. More
+lists Settings, Sources, Safety, and About; Settings owns content preferences and
+raw installation management. Compact root pages use a bottom bar; expanded pages
+use a rail. Secondary phone pages hide the bottom bar, and works/reading hides both.
+
+Duplicate merging affects display only within the app's single signing authority.
+Actions retain `sourceId:pluginId`, saved defaults/oldest installations determine
+source choice, and unavailable choices require explicit selection without automatic
+fallback. Floors and permissions are not merged; NSFW uses the strictest known
+classification among installed copies. Details expose source declarations and
+per-source uninstall, rather than deleting all same-ID copies through one button.
+
+`HomePage` owns returnable settings/source/detail/browser routes; one `HomeOverlay`
+owns selectors and permission/removal/uninstall confirmations. Approval rechecks
+the exact reviewed release. Install-only closes its verification session and
+retains its initiating page; install-and-browse reuses that session. Opening still
+reacquires the remote signed manifest and is not an offline-loading guarantee.
+An unchanged installed release retains its original record and timestamp.
 Text and images have in-app viewing code. Videos open in an external application
 after initial URL approval; custom HTTP headers are rejected. The external
 application controls its subsequent network/redirect/credential behavior.
 
 Implementation inspection is separate from runtime validation. Builds, tests,
 device actions, and screenshots require an explicit user request.
-Parser, compatibility, storage, update-floor, and media-controller test sources
+Parser, compatibility, storage, update-floor, Browse projection/store, connection,
+image-policy/session/decoder, and media-controller test sources
 are present; they have not been executed for this redesign. No claim of successful
 cross-platform compilation, loading, rendering, or live provider access is made.
+Debug image details preserve the typed host rejection and a validated rejected
+header name, without exposing its value; release hides these additional details.
+Exact live requests remain unobserved. Cover-specific request headers and any
+SDK/protocol extension require evidence; browser restrictions cannot be bypassed
+by adding a field. See [the progress ledger](browse-plugin-plan-progress.md).

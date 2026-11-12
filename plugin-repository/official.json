@@ -1,8 +1,0 @@
-{
-  "schemaVersion": 1,
-  "id": "evilo.official",
-  "name": "evilo Official",
-  "description": "Officially reviewed plugins. Certification does not guarantee safety. No release is listed until its signed package and matching source archive are published.",
-  "updatedAt": "2026-11-09T00:00:00Z",
-  "plugins": []
-}

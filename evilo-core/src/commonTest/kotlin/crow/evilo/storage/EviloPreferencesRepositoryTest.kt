@@ -1,4 +1,4 @@
-@file:OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+@file:OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class, kotlinx.serialization.ExperimentalSerializationApi::class)
 
 package crow.evilo.storage
 
@@ -15,6 +15,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.protobuf.ProtoBuf
+import kotlinx.serialization.protobuf.ProtoNumber
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -178,6 +181,82 @@ class EviloPreferencesRepositoryTest {
         assertFailsWith<CorruptionException> { EviloPreferencesCodec.decode(byteArrayOf(0xff.toByte())) }
         assertFailsWith<IllegalArgumentException> { EviloPreferencesCodec.encode(EviloPreferences(schemaVersion = 2)) }
     }
+
+    @Test
+    fun legacyPreferenceFieldsKeepTheirValuesAndNewSettingsHaveDeterministicDefaults() {
+        val legacy = LegacyPreferences(selectedKind = MediaKind.NOVEL, showNsfw = true,
+            pluginValues = mapOf("one" to PluginValues(4, mapOf("setting" to "retained"))))
+        val restored = EviloPreferencesCodec.decode(ProtoBuf { encodeDefaults = true }.encodeToByteArray(LegacyPreferences.serializer(), legacy))
+        assertEquals(MediaKind.NOVEL, restored.selectedKind)
+        assertTrue(restored.showNsfw)
+        assertEquals(legacy.pluginValues, restored.pluginValues)
+        assertTrue(restored.mergeDuplicatePlugins)
+        assertTrue(restored.preferredInstallations.isEmpty())
+    }
+
+    @Test
+    fun duplicateDisplayAndPreferredInstallationsRoundTripWithoutChangingPluginValues() = runTest {
+        val initial = EviloPreferences(pluginValues = mapOf("one" to PluginValues(2, mapOf("setting" to "retained"))))
+        val data = MemoryDataStore(initial)
+        val repository = EviloPreferencesRepository(data)
+        repository.setMergeDuplicatePlugins(false)
+        repository.setPreferredInstallation("one", "source.one:one")
+        val restored = EviloPreferencesCodec.decode(EviloPreferencesCodec.encode(data.data.first()))
+        assertFalse(restored.mergeDuplicatePlugins)
+        assertEquals(mapOf("one" to "source.one:one"), restored.preferredInstallations)
+        assertEquals(initial.pluginValues, restored.pluginValues)
+        val longId = "a".repeat(128)
+        repository.setPreferredInstallation(longId, "source:$longId")
+        assertEquals("source:$longId", repository.currentSettings().preferredInstallations[longId])
+    }
+
+    @Test
+    fun pinningKeepsAnExplicitSourceAndPruningRemovesOnlyIdsWithoutInstallations() = runTest {
+        val values = mapOf("one" to PluginValues(1, mapOf("setting" to "retained")))
+        val data = MemoryDataStore(EviloPreferences(pluginValues = values,
+            preferredInstallations = mapOf("one" to "removed:one", "orphan" to "removed:orphan")))
+        val repository = EviloPreferencesRepository(data)
+        repository.pinDefaultInstallations(mapOf("one" to "new:one", "two" to "new:two"), setOf("one", "two"))
+        assertEquals(mapOf("one" to "removed:one", "two" to "new:two"), repository.currentSettings().preferredInstallations)
+        repository.retainPreferredInstallations(setOf("one"))
+        assertEquals(mapOf("one" to "removed:one"), repository.currentSettings().preferredInstallations)
+        assertEquals(values, data.data.first().pluginValues)
+    }
+
+    @Test
+    fun failedSettingsWritesDoNotPublishOptimisticValues() = runTest {
+        val data = ControlledDataStore().apply { failWrites = true }
+        val repository = EviloPreferencesRepository(data)
+        assertFailsWith<IllegalStateException> { repository.setMergeDuplicatePlugins(false) }
+        assertFailsWith<IllegalStateException> { repository.setPreferredInstallation("one", "source:one") }
+        assertEquals(EviloSettings(), repository.currentSettings())
+    }
+
+    @Test
+    fun preferenceKeysAreBoundedAndCannotPointAtAnotherPlugin() = runTest {
+        val repository = EviloPreferencesRepository(MemoryDataStore(EviloPreferences()))
+        assertFailsWith<IllegalArgumentException> { repository.setPreferredInstallation("one", "source:two") }
+        assertFailsWith<IllegalArgumentException> { repository.setPreferredInstallation("bad:id", "source:bad:id") }
+        assertFailsWith<IllegalArgumentException> { repository.setPreferredInstallation("one", ":one") }
+        for (key in listOf("   :one", "source name:one", "source/other:one", "source\n:one", "source:extra:one"))
+            assertFailsWith<IllegalArgumentException> { repository.setPreferredInstallation("one", key) }
+        repository.setPreferredInstallation("one", "custom.123:one")
+        repository.setPreferredInstallation("one", "bundled:one")
+        repository.setPreferredInstallation("one", "official:one")
+        repository.retainPreferredInstallations(emptySet())
+        val defaults = (0 until 256).associate { "plugin.$it" to "source:plugin.$it" }
+        repository.pinDefaultInstallations(defaults)
+        assertFailsWith<IllegalArgumentException> { repository.setPreferredInstallation("extra", "source:extra") }
+        assertEquals(256, repository.currentSettings().preferredInstallations.size)
+    }
+
+    @Serializable
+    private data class LegacyPreferences(
+        @ProtoNumber(1) val schemaVersion: Int = 1,
+        @ProtoNumber(2) val selectedKind: MediaKind = MediaKind.MANGA,
+        @ProtoNumber(3) val showNsfw: Boolean = false,
+        @ProtoNumber(4) val pluginValues: Map<String, PluginValues> = emptyMap(),
+    )
 
     private class ControlledDataStore : DataStore<EviloPreferences> {
         private val delegate = MemoryDataStore(EviloPreferences())

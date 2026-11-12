@@ -56,6 +56,12 @@ class LatestOperation(parentScope: CoroutineScope) {
         }
     }
 
+    fun cancel() {
+        if (closed) return
+        generation++
+        operation?.cancel()
+    }
+
     suspend fun close() = withContext(NonCancellable) {
         if (!closed) {
             closed = true

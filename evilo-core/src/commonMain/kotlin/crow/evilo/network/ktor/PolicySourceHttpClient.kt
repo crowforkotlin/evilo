@@ -25,14 +25,11 @@ class PolicySourceHttpClient(
 
     suspend fun imageBytes(url: String, headers: Map<String, String>): ByteArray {
         val response = transport.fetch(policy.approveImageUrl(url), policy.imageHeaders(headers), maxImageBytes)
-        check(response.statusCode in 200..299) { "Image request failed: HTTP ${response.statusCode}." }
+        if (response.statusCode !in 200..299) throw HttpStatusException(response.statusCode)
         val type = response.headers.entries.firstOrNull { it.key.equals("content-type", ignoreCase = true) }?.value
         val mediaType = type?.substringBefore(';')?.trim()
-        check(mediaType == null || mediaType.startsWith("image/", ignoreCase = true) ||
-            mediaType.equals("application/octet-stream", ignoreCase = true)
-        ) {
-            "Image request returned '$type' instead of an image."
-        }
+        if (!(mediaType == null || mediaType.startsWith("image/", ignoreCase = true) ||
+            mediaType.equals("application/octet-stream", ignoreCase = true))) throw HttpImageContentException()
         return response.bytes
     }
 }

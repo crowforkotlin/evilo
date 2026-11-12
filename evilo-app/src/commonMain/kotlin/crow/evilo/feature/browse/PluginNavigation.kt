@@ -1,6 +1,6 @@
 package crow.evilo.feature.browse
 
-import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -33,6 +33,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
@@ -45,8 +46,10 @@ import crow.evilo.app.resources.*
 import crow.evilo.model.MediaKind
 import crow.evilo.plugin.catalog.PluginRepositoryState
 import crow.evilo.ui.EviloElevation
+import crow.evilo.ui.EviloContentTransition
 import crow.evilo.ui.EviloLayout
 import crow.evilo.ui.EviloIcons
+import crow.evilo.ui.EviloMotion
 import crow.evilo.ui.EviloSpacing
 import org.jetbrains.compose.resources.stringResource
 
@@ -148,7 +151,7 @@ private fun ContentTypeButton(kind: MediaKind, onClick: () -> Unit, modifier: Mo
         elevation = FloatingActionButtonDefaults.elevation(defaultElevation = EviloElevation.Floating),
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            AnimatedContent(targetState = kind, label = "content-type-icon") {
+            EviloContentTransition(targetState = kind, label = "content-type-icon") {
                 Icon(EviloIcons.kind(it), null, Modifier.size(EviloLayout.IconSize))
             }
             Icon(EviloIcons.Down, null, Modifier.size(EviloLayout.ContentSelectorChevronSize))
@@ -158,7 +161,8 @@ private fun ContentTypeButton(kind: MediaKind, onClick: () -> Unit, modifier: Mo
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun ContentTypeSheet(state: PluginRepositoryState, enabled: Boolean, onDismiss: () -> Unit, onSelect: (MediaKind) -> Unit) {
+internal fun ContentTypeSheet(state: PluginRepositoryState, installedCounts: Map<MediaKind, Int>, enabled: Boolean,
+    onDismiss: () -> Unit, onSelect: (MediaKind) -> Unit) {
     val colors = MaterialTheme.colorScheme
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = colors.surface,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), sheetMaxWidth = EviloLayout.SheetMaxWidth) {
@@ -176,15 +180,21 @@ internal fun ContentTypeSheet(state: PluginRepositoryState, enabled: Boolean, on
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(EviloSpacing.Medium)) {
                     kinds.forEach { kind ->
                         val active = state.selectedKind == kind
-                        val count = state.listings.count { kind in it.plugin.kinds && (state.showNsfw || !it.plugin.nsfw) }
+                        val count = installedCounts[kind] ?: 0
+                        val container by animateColorAsState(if (active) colors.primaryContainer else colors.surfaceContainerLow,
+                            EviloMotion.componentSpec(), label = "kind-container")
+                        val contentColor by animateColorAsState(if (active) colors.onPrimaryContainer else colors.onSurface,
+                            EviloMotion.componentSpec(), label = "kind-content")
+                        val outline by animateColorAsState(if (active) colors.primary else colors.outlineVariant,
+                            EviloMotion.componentSpec(), label = "kind-outline")
                         Surface(
                             onClick = { onSelect(kind) },
                             enabled = enabled,
                             modifier = Modifier.weight(1f).semantics { selected = active },
                             shape = MaterialTheme.shapes.large,
-                            color = if (active) colors.primaryContainer else colors.surfaceContainerLow,
-                            contentColor = if (active) colors.onPrimaryContainer else colors.onSurface,
-                            border = BorderStroke(EviloLayout.BorderWidth, if (active) colors.primary else colors.outlineVariant),
+                            color = container,
+                            contentColor = contentColor,
+                            border = BorderStroke(EviloLayout.BorderWidth, outline),
                         ) {
                             Column(Modifier.heightIn(min = EviloLayout.ContentChoiceMinHeight).padding(EviloSpacing.Large),
                                 verticalArrangement = Arrangement.spacedBy(EviloSpacing.Small)) {

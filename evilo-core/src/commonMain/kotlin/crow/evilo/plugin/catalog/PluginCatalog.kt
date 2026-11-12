@@ -4,11 +4,12 @@ import crow.evilo.model.MediaKind
 import crow.evilo.plugin.api.PluginPermissions
 import crow.evilo.plugin.api.ProtocolRequirement
 import kotlinx.serialization.Serializable
+import kotlin.time.Instant
 
 const val PLUGIN_CATALOG_SCHEMA_VERSION = 1
-const val OFFICIAL_SOURCE_ID = "official"
-const val DEFAULT_OFFICIAL_CATALOG_URL =
-    "https://raw.githubusercontent.com/crowforkotlin/evilo/main/plugin-repository/official.json"
+const val BUNDLED_SOURCE_ID = "bundled"
+const val DEFAULT_BUNDLED_CATALOG_URL =
+    "https://raw.githubusercontent.com/crowforkotlin/evilo/main/plugin-repository/plugin.json"
 
 @Serializable
 data class PluginAuthor(val name: String, val url: String? = null)
@@ -49,7 +50,6 @@ data class CatalogPlugin(
     val updatedAt: String,
     val forceUpdate: Boolean = false,
     val minimumUsableVersionCode: Long = 1,
-    val certified: Boolean = false,
     val availableVersions: List<PluginRelease>,
 ) {
     val latestRelease: PluginRelease get() = availableVersions.maxBy { it.versionCode }
@@ -82,7 +82,6 @@ data class CatalogSnapshot(
 
 data class CatalogListing(val snapshot: CatalogSnapshot, val plugin: CatalogPlugin) {
     val key: String get() = "${snapshot.subscription.id}:${plugin.id}"
-    val officiallyCertified: Boolean get() = snapshot.subscription.id == OFFICIAL_SOURCE_ID && plugin.certified
 }
 
 @Serializable
@@ -96,3 +95,5 @@ data class InstalledPlugin(
 ) {
     val key: String get() = "$sourceId:${plugin.id}"
 }
+
+internal fun installationOrderTime(value: String): Instant? = try { Instant.parse(value) } catch (_: IllegalArgumentException) { null }

@@ -4,6 +4,6 @@ import androidx.compose.runtime.Composable
 import crow.evilo.ui.WithEviloFont
 
 @Composable
-fun WebApp() {
-    WithEviloFont { App() }
+fun WebApp(debugDiagnostics: Boolean = false) {
+    WithEviloFont { App(debugDiagnostics) }
 }

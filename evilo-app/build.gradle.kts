@@ -12,8 +12,8 @@ plugins {
 }
 
 val bundledCatalog = tasks.register<GenerateBundledPluginCatalog>("generateBundledPluginCatalog") {
-    catalogFile.set(rootProject.layout.projectDirectory.file("plugin-repository/official.json"))
-    outputDirectory.set(layout.buildDirectory.dir("generated/officialCatalog"))
+    catalogFile.set(rootProject.layout.projectDirectory.file("plugin-repository/plugin.json"))
+    outputDirectory.set(layout.buildDirectory.dir("generated/bundledCatalog"))
 }
 val pluginKeys = tasks.register<GenerateEviloPluginKeys>("generatePluginSigningKeys") {
     group = "evilo"
@@ -48,11 +48,16 @@ kotlin {
         commonMain.dependencies {
             api(projects.eviloCore)
             implementation(libs.compose.animation)
+            implementation(libs.compose.ui.backhandler)
             implementation(libs.coil.compose)
             implementation(libs.coil.core)
             implementation(libs.koin.compose)
             implementation(libs.androidx.datastore.okio)
             implementation(libs.okio)
+        }
+        commonTest.dependencies {
+            implementation(libs.ktor.client.mock)
+            implementation(libs.kotlinx.coroutines.test)
         }
         androidMain.dependencies {
             implementation(libs.androidx.sqlite.bundled)

@@ -4,16 +4,19 @@ import crow.evilo.plugin.api.PluginJson
 import crow.evilo.network.ktor.PluginUrlPolicy
 import crow.evilo.network.ktor.validatePluginPermissions
 import io.ktor.http.decodeURLPart
+import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.jsonObject
 import kotlin.time.Instant
 
 class CatalogParser {
     fun parse(text: String, allowHttp: Boolean): PluginCatalog {
         require(text.encodeToByteArray().size <= 2 * 1024 * 1024) { "Plugin catalog exceeds 2 MiB." }
-        return validate(PluginJson.decodeFromString<PluginCatalog>(text), allowHttp)
+        val json = normalizeCatalogJson(PluginJson.parseToJsonElement(text).jsonObject)
+        return validate(PluginJson.decodeFromJsonElement<PluginCatalog>(json), allowHttp)
     }
 
     fun validate(catalog: PluginCatalog, allowHttp: Boolean): PluginCatalog {
-        require(catalog.schemaVersion == PLUGIN_CATALOG_SCHEMA_VERSION) { "Unsupported plugin catalog schema ${catalog.schemaVersion}." }
+        require(catalog.schemaVersion == PLUGIN_CATALOG_SCHEMA_VERSION) { "Unsupported plugin catalog format version ${catalog.schemaVersion}." }
         require(catalog.id.length <= 128 && ID.matches(catalog.id)) { "Invalid catalog ID." }
         requireText(catalog.name, 120, "catalog name")
         requireText(catalog.description, 4096, "catalog description", allowEmpty = true)
@@ -36,7 +39,7 @@ class CatalogParser {
         require(plugin.languages.size in 1..32 && plugin.languages.distinct().size == plugin.languages.size && plugin.languages.all(LANGUAGE::matches)) { "Invalid plugin languages." }
         require(plugin.kinds.isNotEmpty()) { "A plugin must declare its media kinds." }
         sourceUrl(plugin.sourceUrl, allowHttp)
-        PluginUrlPolicy.check(plugin.iconUrl, allowHttp)
+        if (plugin.iconUrl.isNotEmpty()) PluginUrlPolicy.check(plugin.iconUrl, allowHttp)
         val created = Instant.parse(plugin.createdAt)
         val updated = Instant.parse(plugin.updatedAt)
         require(updated >= created) { "Plugin update date precedes its creation date." }

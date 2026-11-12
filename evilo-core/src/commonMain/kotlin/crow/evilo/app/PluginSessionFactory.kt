@@ -16,9 +16,13 @@ import crow.evilo.storage.EviloPreferencesRepository
 import crow.evilo.storage.PluginStorageSession
 import crow.evilo.storage.StoreLock
 import crow.evilo.feature.reader.MediaSourceSession
+import crow.evilo.feature.reader.PluginSessionClosedException
 import crow.wasmline.WasmlineConfig
 import crow.wasmline.loader.WasmlineLoadOptions
-import crow.wasmline.loader.WasmlineNoOpCache
+import crow.wasmline.loader.network.WasmlineHttpResponse
+import crow.wasmline.loader.network.WasmlineHttpStatus
+import crow.wasmline.loader.network.WasmlineNetworkClient
+import crow.wasmline.loader.network.WasmlineNetworkSink
 import crow.wasmline.loader.WasmlineTrustedKeys
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -33,8 +37,11 @@ class PluginSessionFactory(
     private val preferences: EviloPreferencesRepository,
     private val trustedKeys: WasmlineTrustedKeys,
     private val transport: BoundedHttpTransport,
-) {
-    suspend fun connect(plugin: CatalogPlugin, release: PluginRelease, allowHttp: Boolean): MediaSourceSession {
+) : PluginSessionConnector {
+    override suspend fun connect(plugin: CatalogPlugin, release: PluginRelease, allowHttp: Boolean,
+        onPhase: (PluginLoadPhase) -> Unit): MediaSourceSession {
+        val callerContext = currentCoroutineContext()
+        suspend fun report(phase: PluginLoadPhase) = withContext(callerContext) { onPhase(phase) }
         val expected = PluginDescriptor(plugin.id, plugin.name, release.version, release.versionCode, release.kinds,
             release.languages, release.protocol, release.permissions)
         val packagePolicy = PackageNetworkPolicy(release.manifestUrl, allowHttp)
@@ -43,13 +50,18 @@ class PluginSessionFactory(
         val http = PluginHttpClient(transport, policy)
         var loaded: MediaSource? = null
         try {
+            onPhase(PluginLoadPhase.LOADING_PACKAGE)
             withContext(Dispatchers.Default) {
                 store.transaction { loaded = WasmlinePluginLoader(host, store, http).loadRemote(
                     packagePolicy.manifestUrl,
                     WasmlineLoadOptions(runtimeConfig = WasmlineConfig(supportConcurrent = true), trustedKeys = trustedKeys,
-                        networkClient = PolicyPackageNetworkClient(transport, packagePolicy), cache = WasmlineNoOpCache,
+                        networkClient = PackageProgressClient(packagePolicy.manifestUrl,
+                            PolicyPackageNetworkClient(transport, packagePolicy), ::report),
+                        // A zero manifest TTL still fetches/verifies the signed manifest on every open.
+                        // The default loader cache reuses only content-addressed, hash-checked artifacts.
                         manifestTtlMs = 0, maxCacheBytes = 128L * 1024 * 1024, maxArtifactBytes = 64L * 1024 * 1024),
                     expected, release.sourceRevision, release.sourceArchiveSha256,
+                    onNegotiating = { report(PluginLoadPhase.NEGOTIATING) },
                 ) }
             }
             currentCoroutineContext().ensureActive()
@@ -62,6 +74,29 @@ class PluginSessionFactory(
             }
             throw failure
         }
+    }
+}
+
+/** Reports only observable boundaries; cache verification and runtime creation may share one phase. */
+private class PackageProgressClient(
+    private val manifestUrl: String,
+    private val delegate: WasmlineNetworkClient,
+    private val report: suspend (PluginLoadPhase) -> Unit,
+) : WasmlineNetworkClient {
+    override suspend fun fetch(url: String): WasmlineHttpResponse {
+        report(if (url == manifestUrl) PluginLoadPhase.FETCHING_MANIFEST else PluginLoadPhase.DOWNLOADING_ARTIFACT)
+        val response = delegate.fetch(url)
+        if (response.statusCode in 200..299)
+            report(if (url == manifestUrl) PluginLoadPhase.VERIFYING_PACKAGE else PluginLoadPhase.INITIALIZING_RUNTIME)
+        return response
+    }
+
+    override suspend fun fetchTo(url: String, sink: WasmlineNetworkSink): WasmlineHttpStatus {
+        report(if (url == manifestUrl) PluginLoadPhase.FETCHING_MANIFEST else PluginLoadPhase.DOWNLOADING_ARTIFACT)
+        val response = delegate.fetchTo(url, sink)
+        if (response.statusCode in 200..299)
+            report(if (url == manifestUrl) PluginLoadPhase.VERIFYING_PACKAGE else PluginLoadPhase.INITIALIZING_RUNTIME)
+        return response
     }
 }
 
@@ -102,7 +137,7 @@ private class PluginMediaSession(
         }
     }
 
-    private fun ensureOpen() = stateLock.withLock { check(!closed) { "This plugin session is closed." } }
+    private fun ensureOpen() = stateLock.withLock { if (closed) throw PluginSessionClosedException() }
 }
 
 private class BackgroundMediaSource(private val delegate: MediaSource, private val store: PluginStorageSession) : MediaSource by delegate {

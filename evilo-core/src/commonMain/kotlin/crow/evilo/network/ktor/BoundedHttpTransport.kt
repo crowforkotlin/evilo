@@ -11,6 +11,7 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.utils.io.readAvailable
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -68,38 +69,46 @@ class BoundedHttpTransport(
     ): HttpStreamResponse {
         require(maxBytes > 0) { "The HTTP response byte limit must be positive." }
         val requestHeaders = request.headers.toMap()
-        return withTimeoutOrNull(requestTimeoutMillis) {
-            requests.withPermit {
-                client.prepareRequest(request.url) {
-                    method = HttpMethod.parse(request.method)
-                    requestHeaders.forEach { (name, value) -> this.headers.append(name, value) }
-                    request.body?.let { setBody(it) }
-                }.execute { response ->
-                    check(response.status.value !in 300..399 && response.status.value != 0) {
-                        "HTTP redirects are disabled; a redirect or opaque browser response was rejected."
+        var sinkFailure: Throwable? = null
+        try {
+            return withTimeoutOrNull(requestTimeoutMillis) {
+                requests.withPermit {
+                    client.prepareRequest(request.url) {
+                        method = HttpMethod.parse(request.method)
+                        requestHeaders.forEach { (name, value) -> this.headers.append(name, value) }
+                        request.body?.let { setBody(it) }
+                    }.execute { response ->
+                        if (response.status.value in 300..399) throw HttpRedirectRejectedException(response.status.value)
+                        if (response.status.value == 0) throw HttpOpaqueResponseException()
+                        val contentLength = response.headers[HttpHeaders.ContentLength]?.toLongOrNull()
+                        if (contentLength != null && contentLength !in 0..maxBytes) throw HttpResponseLimitException(maxBytes, response.status.value)
+                        val channel = response.bodyAsChannel()
+                        val chunk = ByteArray(8192)
+                        var received = 0L
+                        while (true) {
+                            currentCoroutineContext().ensureActive()
+                            val size = channel.readAvailable(chunk)
+                            if (size == -1) break
+                            received += size
+                            if (received > maxBytes) throw HttpResponseLimitException(maxBytes, response.status.value)
+                            try { sink(chunk, 0, size) }
+                            catch (failure: Throwable) { sinkFailure = failure; throw failure }
+                        }
+                        HttpStreamResponse(
+                            response.status.value,
+                            response.headers.entries().associate { (name, values) -> name to values.joinToString(", ") },
+                        )
                     }
-                    val contentLength = response.headers[HttpHeaders.ContentLength]?.toLongOrNull()
-                    check(contentLength == null || contentLength in 0..maxBytes) {
-                        "HTTP response exceeds the $maxBytes byte limit."
-                    }
-                    val channel = response.bodyAsChannel()
-                    val chunk = ByteArray(8192)
-                    var received = 0L
-                    while (true) {
-                        currentCoroutineContext().ensureActive()
-                        val size = channel.readAvailable(chunk)
-                        if (size == -1) break
-                        received += size
-                        check(received <= maxBytes) { "HTTP response exceeds the $maxBytes byte limit." }
-                        sink(chunk, 0, size)
-                    }
-                    HttpStreamResponse(
-                        response.status.value,
-                        response.headers.entries().associate { (name, values) -> name to values.joinToString(", ") },
-                    )
                 }
-            }
-        } ?: error("HTTP request timed out after $requestTimeoutMillis ms.")
+            } ?: throw HttpTransportTimeoutException(requestTimeoutMillis)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: HttpTransportException) {
+            throw failure
+        } catch (failure: Exception) {
+            if (failure === sinkFailure) throw failure
+            throw HttpNetworkException(failure)
+        }
     }
 
     fun close() = client.close()

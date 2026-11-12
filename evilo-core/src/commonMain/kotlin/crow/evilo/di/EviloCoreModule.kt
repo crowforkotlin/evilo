@@ -24,6 +24,7 @@ fun eviloCoreModule(
     preferences: DataStore<EviloPreferences>,
     catalogs: PluginCatalogStore,
     appScope: CoroutineScope,
+    debugDiagnostics: Boolean = false,
 ) = module {
     single { host }
     single { trustedKeys }
@@ -34,7 +35,7 @@ fun eviloCoreModule(
     single { BoundedHttpTransport(get()) }
     single { PluginCatalogRepository(get(), get(), get(), get()) }
     single { PluginSessionFactory(get(), get(), get(), get()) }
-    single { AppPluginController(get(), get(), appScope) }
+    single { AppPluginController(get(), get<PluginSessionFactory>(), appScope, debugDiagnostics) }
     single { PluginHomeStore(get(), get(), appScope) }
     factory { (session: MediaSourceSession, kind: MediaKind) -> MediaBrowserController(session, kind, appScope) }
 }

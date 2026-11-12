@@ -9,6 +9,11 @@ dependencies {
     implementation(libs.kotlinx.coroutinesSwing)
 }
 
+// Development runs show diagnostics; packaged applications do not inherit this property.
+tasks.withType<JavaExec>().matching { it.name == "run" }.configureEach {
+    systemProperty("evilo.debugDiagnostics", "true")
+}
+
 compose.desktop {
     application {
         mainClass = "crow.evilo.desktop.MainKt"

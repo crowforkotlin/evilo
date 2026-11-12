@@ -29,8 +29,8 @@ abstract class GenerateBundledPluginCatalog : DefaultTask() {
                 }
             } + "\""
         }
-        val output = outputDirectory.file("crow/evilo/feature/browse/BundledOfficialCatalog.kt").get().asFile
+        val output = outputDirectory.file("crow/evilo/feature/browse/BundledPluginCatalog.kt").get().asFile
         output.parentFile.mkdirs()
-        output.writeText("package crow.evilo.feature.browse\n\nval BundledOfficialCatalogJson: String = listOf(\n$literals\n).joinToString(\"\")\n")
+        output.writeText("package crow.evilo.feature.browse\n\nval BundledPluginCatalogJson: String = listOf(\n$literals\n).joinToString(\"\")\n")
     }
 }

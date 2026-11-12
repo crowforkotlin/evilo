@@ -12,6 +12,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -41,7 +42,7 @@ import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.KoinIsolatedContext
 
 @Composable
-fun App() {
+fun App(debugDiagnostics: Boolean = platformDebugDiagnostics()) {
     val inspection = LocalInspectionMode.current
     val factory = if (inspection) remember { AppStorageFactory { AppStorage.preview() } } else rememberAppStorageFactory()
     val context = LocalPlatformContext.current
@@ -50,14 +51,14 @@ fun App() {
     var startupError by remember { mutableStateOf<String?>(null) }
     var attempt by remember { mutableStateOf(0) }
 
-    LaunchedEffect(factory, context, attempt) {
+    LaunchedEffect(factory, context, attempt, debugDiagnostics) {
         // A retry cannot open the same DataStore files until the previous environment has closed.
         environments.withLock {
             startupError = null
             var owned: AppEnvironment? = null
             var failure: Throwable? = null
             try {
-                val ready = AppEnvironment.create(factory, context, CoroutineScope(currentCoroutineContext()))
+                val ready = AppEnvironment.create(factory, context, CoroutineScope(currentCoroutineContext()), debugDiagnostics)
                 owned = ready
                 environment = ready
                 if (!inspection) ready.home.dispatch(PluginHomeIntent.Refresh)
@@ -85,7 +86,9 @@ fun App() {
             Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(MaterialTheme.colorScheme.surfaceContainerLow,
                 MaterialTheme.colorScheme.background)))) {
                 val ready = environment
-                if (ready != null) KoinIsolatedContext(ready.koin) { PluginHome() }
+                if (ready != null) CompositionLocalProvider(LocalAppDiagnostics provides debugDiagnostics) {
+                    KoinIsolatedContext(ready.koin) { PluginHome() }
+                }
                 else Column(Modifier.fillMaxSize().padding(EviloSpacing.ExtraLarge), horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(EviloSpacing.Large, Alignment.CenterVertically)) {
                     if (startupError == null) {

@@ -15,6 +15,7 @@ import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertSame
 
 class BoundedHttpTransportTest {
     @Test
@@ -93,5 +94,34 @@ class BoundedHttpTransportTest {
         } finally {
             transport.close()
         }
+    }
+
+    @Test
+    fun redirectsAndByteLimitsKeepTypedStatusInformation() = runTest {
+        var redirect = true
+        val client = HttpClient(MockEngine {
+            if (redirect) respond("redirect", HttpStatusCode.Found)
+            else respond("oversized", HttpStatusCode.Forbidden)
+        }) { followRedirects = false }
+        val transport = BoundedHttpTransport(client)
+        try {
+            assertEquals(302, assertFailsWith<HttpRedirectRejectedException> { transport.fetch("https://example.com/", emptyMap(), 4) }.statusCode)
+            redirect = false
+            val limit = assertFailsWith<HttpResponseLimitException> { transport.fetch("https://example.com/", emptyMap(), 4) }
+            assertEquals(403, limit.statusCode)
+            assertEquals(4L, limit.maxBytes)
+        } finally { transport.close() }
+    }
+
+    @Test
+    fun sinkFailuresAreNotRenamedAsNetworkFailures() = runTest {
+        val client = HttpClient(MockEngine { respond("data") }) { followRedirects = false }
+        val transport = BoundedHttpTransport(client)
+        val failure = IllegalStateException("Artifact storage failed.")
+        try {
+            assertSame(failure, assertFailsWith<IllegalStateException> {
+                transport.stream("https://example.com/", emptyMap(), 1024) { _, _, _ -> throw failure }
+            })
+        } finally { transport.close() }
     }
 }
