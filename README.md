@@ -126,7 +126,10 @@ retains its original record and timestamp. Returning or replacing a load cancels
 obsolete work and closes acquired handles before another session is accepted.
 
 Predictive Back previews Reader -> details -> works catalog -> previous home page
-using the shared page transition. Cancellation retains the current navigation
+using full-page scale/rounded corners/edge-aware movement matching the default
+Android predictive geometry in Flutter 3.44.2. App bars participate and the previous
+page stays still underneath. Completion restores the scale while fading out;
+ordinary button navigation keeps its slide/fade. Cancellation retains the current navigation
 state; completion dispatches the existing Back action. Search and saveable list
 positions remain attached to their page keys. Android explicitly enables system
 predictive Back; the root home page does not intercept back-to-home. Gesture

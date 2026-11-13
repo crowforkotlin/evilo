@@ -73,8 +73,10 @@ form text and local version selection may stay in Compose state.
   Its Koin factory receives the session and selected `MediaKind`; the Compose
   route closes the controller and image scope on disposal. Nested Back retains
   catalog results/query and saveable list positions rather than searching again.
-  `EviloPredictiveBackHandler` seeks shared page transitions using render-only back
-  snapshots; only gesture completion dispatches Back. Cancellation retains the
+  `EviloPredictiveBackHandler` mounts render-only back snapshots and transforms
+  the complete outgoing page (including app bar) using `EviloPredictiveMotion`;
+  gesture motion is separate from ordinary slide/fade. Only completion dispatches
+  Back. Cancellation retains the
   page/session, stale navigation keys cannot pop replacement pages, and root home
   Back remains available to the operating system. Keep the handler callback stable.
 - `LatestOperation` cancels obsolete jobs and serializes replacements with a

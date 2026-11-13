@@ -268,10 +268,18 @@ History, Updates, or Downloads items merely to fill four navigation slots.
   fade. Keep full state snapshots and saveable page keys while outgoing content
   finishes its transition; it must not receive pointer, keyboard, or Back actions.
   Clip page slides to the content bounds rather than drawing over navigation.
-- Predictive Back seeks the same page transition toward a render-only previous
-  snapshot. `EviloBackTransitionState` owns seeking, not the MVI return stack.
-  Gesture cancellation restores the current page; completion settles the transition
-  and then dispatches the existing Back action. Disable page input during seeking,
+- Predictive Back uses the Flutter 3.44.2 default Android shared-element page
+  geometry used by the Kira reference: the complete page including its app bar
+  stays opaque during drag, scales from 1 to 0.90, shifts horizontally by
+  `(width / 20 - 8dp) * progress` with the swipe edge, follows vertical touch
+  movement with ease-out, and rounds toward a 32dp fallback radius. The previous
+  page stays still beneath it. Commit restores scale/radius while shifting right
+  by 10% of height and fading out over 400 ms with the emphasized two-part cubic;
+  cancellation returns to the current page. Ordinary button navigation keeps the
+  existing slide/fade. This is a source-level motion match, not a claim of identical
+  pixels: device corner radii and Kira's separate cover-Hero transition are not
+  reproduced. `EviloBackTransitionState` owns preview, not the MVI return stack.
+  Only completion dispatches Back. Disable page input during preview,
   retain saveable page keys and active sessions, and reject a stale gesture after
   another navigation changes its destination. Nested Reader/Details handlers take
   precedence; the catalog delegates to the home stack. The root home destination

@@ -112,8 +112,11 @@ Local unsubmitted form text and version selection may remain Compose state.
   details, chapters, retry, and back. Its route closes the controller/session and
   image scope when it leaves composition. `MediaBrowserState.backDestination()`
   supplies the same previous-page snapshot to both preview and committed Back.
-  Shared `EviloPredictiveBackHandler` collects gesture progress and seeks an
-  `EviloPageTransition` through `SeekableTransitionState`. It does not dispatch
+  Shared `EviloPredictiveBackHandler` retains progress, swipe edge, and vertical
+  touch movement in portable `EviloBackEvent` values. It mounts a previous page
+  through `SeekableTransitionState`, keeps both pages alive, and transforms the
+  full outgoing page with Flutter-style predictive geometry, separately from the
+  ordinary page slide/fade. It does not dispatch
   intents while swiping; cancellation restores the page and completion commits
   Back only if the navigation key still matches. Catalog Back delegates to the
   home handler, and the root does not intercept system exit.

@@ -17,9 +17,12 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MotionScheme
@@ -32,6 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
@@ -39,6 +43,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.dp
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 internal object EviloMotion {
@@ -91,6 +96,8 @@ internal fun <T> EviloPageTransition(
         transitionSpec = {
             val change = depth(this.targetState).compareTo(depth(initialState))
             val transform = when {
+                previewing -> (fadeIn(tween(EviloPredictiveMotion.CommitMillis, easing = EviloPredictiveMotion.emphasized), initialAlpha = 0.9999f) togetherWith
+                    ExitTransition.KeepUntilTransitionsFinished).apply { targetContentZIndex = -1f }
                 contentKey(initialState) == contentKey(this.targetState) -> EnterTransition.None togetherWith ExitTransition.None
                 change == 0 -> fadeIn(EviloMotion.spatialSpec()) togetherWith fadeOut(EviloMotion.exitSpec())
                 else -> {
@@ -104,7 +111,30 @@ internal fun <T> EviloPageTransition(
     ) { displayed ->
         val active = parentActive && !previewing && contentKey(displayed) == contentKey(targetState)
         CompositionLocalProvider(LocalEviloPageActive provides active) {
-            Box(Modifier.fillMaxSize().eviloTransitionInput(active), contentAlignment = Alignment.TopCenter) { content(displayed) }
+            val density = LocalDensity.current.density
+            val surface = MaterialTheme.colorScheme.background
+            val moving = previewing && backState?.outgoing?.let(contentKey) == contentKey(displayed)
+            Box(Modifier.fillMaxSize().graphicsLayer {
+                if (moving && backState != null) {
+                    val motion = EviloPredictiveMotion.geometry(backState.event.progress, backState.event.touchY - backState.startY,
+                        backState.event.fromRight, size.width, size.height, density, backState.commitFraction)
+                    scaleX = motion.scale
+                    scaleY = motion.scale
+                    // Flutter scales the translated child, so scale its offset as well.
+                    translationX = motion.x * motion.scale
+                    translationY = motion.y * motion.scale
+                    alpha = motion.alpha
+                    shape = RoundedCornerShape((motion.radius / density).dp)
+                    clip = true
+                } else {
+                    scaleX = 1f
+                    scaleY = 1f
+                    translationX = 0f
+                    translationY = 0f
+                    alpha = 1f
+                    clip = false
+                }
+            }.background(surface).eviloTransitionInput(active), contentAlignment = Alignment.TopCenter) { content(displayed) }
         }
     }
 }

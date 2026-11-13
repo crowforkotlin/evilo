@@ -160,6 +160,10 @@ private fun PluginHomeScreen(state: PluginHomeState, images: EviloImages, host: 
     }
     EviloPredictiveBackHandler(backEnabled, backTransition, state, previous,
         navigationKey = state.pages to state.overlay, onBack = { dispatch(PluginHomeIntent.Back) })
+    EviloPageTransition(state, contentKey = ::homePageKey, depth = { it.pages.size }, label = "home-page", backState = backTransition) { displayed ->
+    val state = displayed
+    val page = displayed.page
+    val active = displayed.connection.active?.takeIf { page is HomePage.PluginBrowser && it.installationKey == page.key }
     BoxWithConstraints(Modifier.fillMaxSize().eviloTransitionInput(!backTransition.previewing).onPreviewKeyEvent {
         if (backEnabled && active == null && it.key == Key.Escape && it.type == KeyEventType.KeyUp) {
             dispatch(PluginHomeIntent.Back)
@@ -194,8 +198,6 @@ private fun PluginHomeScreen(state: PluginHomeState, images: EviloImages, host: 
                 },
             ) { padding ->
                 Box(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding), contentAlignment = Alignment.TopCenter) {
-                    EviloPageTransition(state, contentKey = ::homePageKey, depth = { it.pages.size }, label = "home-page",
-                        backState = backTransition) { displayed ->
                         val displayedPage = displayed.page
                         val contentWidth = when (displayedPage) {
                             null, is HomePage.SourceCatalog, is HomePage.PluginBrowser, HomePage.InstalledPlugins -> EviloLayout.ContentMaxWidth
@@ -243,13 +245,13 @@ private fun PluginHomeScreen(state: PluginHomeState, images: EviloImages, host: 
                                 }
                             }
                         }
-                    }
                     EviloProgressIndicator(active == null && (state.changing || state.catalog.refreshing),
                         Modifier.align(Alignment.TopCenter).widthIn(max = EviloLayout.ContentMaxWidth).fillMaxWidth())
                     Box(Modifier.fillMaxSize().imePadding()) { EviloToastHost(toasts, expanded) }
                 }
             }
         }
+    }
     }
     when (val overlay = state.overlay) {
         HomeOverlay.ContentKinds -> ContentTypeSheet(state.catalog, state.kindCounts, enabled = state.canMutate,

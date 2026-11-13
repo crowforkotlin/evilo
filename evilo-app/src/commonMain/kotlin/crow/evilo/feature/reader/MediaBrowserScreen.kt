@@ -113,7 +113,7 @@ fun MediaBrowserRoute(session: MediaSourceSession, kind: MediaKind, onClose: () 
     val retryLabel = stringResource(Res.string.source_retry)
     val back = { if (!connected || state.page == MediaBrowserPage.CATALOG) onClose() else controller.dispatch(MediaBrowserIntent.Back) }
     // Catalog/disconnected Back belongs to the home stack, which can preview its real destination.
-    EviloPredictiveBackHandler(pageActive && connected && state.page != MediaBrowserPage.CATALOG && !showLoadDiagnostics,
+    EviloPredictiveBackHandler((pageActive || backTransition.previewing) && connected && state.page != MediaBrowserPage.CATALOG && !showLoadDiagnostics,
         backTransition, state, state.backDestination(), navigationKey = mediaPageKey(state), onBack = back)
     LaunchedEffect(controller, state.page, pageActive) { if (pageActive) focus.requestFocus() }
     LaunchedEffect(state.error, state.page, pageActive, connected) {
@@ -133,7 +133,10 @@ fun MediaBrowserRoute(session: MediaSourceSession, kind: MediaKind, onClose: () 
             closeResources({ images.close() }, { controller.close() })
         }
     }
-    BoxWithConstraints(modifier.fillMaxSize().eviloTransitionInput(!backTransition.previewing).onPreviewKeyEvent {
+    EviloPageTransition(state, contentKey = ::mediaPageKey, depth = { it.page.ordinal }, modifier = modifier,
+        label = "media-page", backState = backTransition) { displayed ->
+    val state = displayed
+    BoxWithConstraints(Modifier.fillMaxSize().eviloTransitionInput(!backTransition.previewing).onPreviewKeyEvent {
         if (pageActive && it.key == Key.Escape && it.type == KeyEventType.KeyUp) { back(); true } else false
     }.focusRequester(focus).focusable()) {
         val pagePadding = if (maxWidth >= EviloLayout.ExpandedBreakpoint) EviloLayout.WidePagePadding else EviloLayout.PagePadding
@@ -169,8 +172,6 @@ fun MediaBrowserRoute(session: MediaSourceSession, kind: MediaKind, onClose: () 
                 }
             } else {
                 Box(Modifier.weight(1f).fillMaxWidth()) {
-                    EviloPageTransition(state, contentKey = ::mediaPageKey, depth = { it.page.ordinal }, label = "media-page",
-                        backState = backTransition) { displayed ->
                         savedPages.SaveableStateProvider(mediaPageKey(displayed)) {
                             val retry = { controller.dispatch(MediaBrowserIntent.Retry) }
                             when (displayed.page) {
@@ -185,11 +186,11 @@ fun MediaBrowserRoute(session: MediaSourceSession, kind: MediaKind, onClose: () 
                                     { controller.dispatch(MediaBrowserIntent.OpenChapter(it)) }, pagePadding, onPermissions, retry)
                             }
                         }
-                    }
                     EviloProgressIndicator(state.busy, Modifier.align(Alignment.TopCenter).fillMaxWidth())
                 }
             }
         }
+    }
     }
 }
 
