@@ -28,7 +28,7 @@ private fun normalizePluginJson(plugin: JsonObject): JsonObject {
     val versions = requireNotNull(plugin["availableVersions"]) { "A plugin must declare its availableVersions list." }.jsonArray
     require(versions.size in 1..64) { "A plugin must list 1 to 64 available versions." }
     // Only omitted fields inherit defaults; an explicit release override is never merged or replaced.
-    val inherited = listOf("kinds", "languages", "sourceUrl", "permissions", "protocol")
+    val inherited = listOf("kinds", "languages", "sourceUrl", "permissions", "protocol", "signing")
         .mapNotNull { key -> plugin[key]?.let { key to it } }.toTypedArray()
     val releases = versions.map { normalizeDates(it.jsonObject.withDefaults(*inherited), "publishedAt") }
     val latest = releases.maxBy { release ->

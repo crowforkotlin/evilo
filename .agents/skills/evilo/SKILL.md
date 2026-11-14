@@ -105,8 +105,9 @@ All/Installed filters belong to source catalogs. Info opens plugin details witho
 connecting a works session. Duplicate merging is display-only, defaults on, and
 keeps source-qualified installation keys and explicit/oldest default source choices.
 Do not silently switch sources or compare mirror versions to choose a default.
-Independent sources cannot add trusted signing keys; install/update still requires
-the app authority's signed releases and explicit permission approval. Changing
+Sources may declare publisher public keys, but declarations never grant trust.
+Third-party signed releases require explicit version/fingerprint/permission approval
+and a pinned signed manifest; retain the official-key fallback for legacy catalogs. Changing
 common defaults must not silently alter approved installation permissions.
 The built-in subscription can be disabled, not removed. Every mandatory version
 floor is scoped to its subscription, including the built-in one. Preserve the

@@ -69,7 +69,7 @@ internal fun PluginDetailScreen(state: PluginHomeState, entry: PluginEntry, imag
     }
     val choice = entry.releases.firstOrNull { it.release.versionCode == versionCode }
     val release = choice?.release
-    val sameRelease = release != null && installed?.release == release
+    val sameRelease = release != null && installed?.release == release && installed?.approvedManifestSha256 != null
     val canBrowse = installed != null && entry.openBlock == null
     val source = state.catalog.subscriptions.firstOrNull { it.id == entry.sourceId }
     val blocked = pluginBlockLabel(choice?.block) ?: choice?.blocked
@@ -196,10 +196,15 @@ internal fun PluginDetailScreen(state: PluginHomeState, entry: PluginEntry, imag
                     Column(Modifier.animateContentSize(EviloMotion.componentSpec()).padding(EviloSpacing.Large), verticalArrangement = Arrangement.spacedBy(EviloSpacing.Medium)) {
                         installed?.let {
                             Text(stringResource(Res.string.plugin_installed_version, it.release.version), style = MaterialTheme.typography.titleSmall)
+                            PluginSigningText(it.release, entry.releases.firstOrNull { choice -> choice.release == it.release }?.officialSigner == true)
+                            it.approvedManifestSha256?.takeIf { digest -> digest != it.release.manifestSha256 }?.let { digest ->
+                                SelectionContainer { Text(stringResource(Res.string.plugin_manifest_hash, digest), style = MaterialTheme.typography.bodySmall) }
+                            }
                             PluginSourceLinks(it.release.sourceUrl, it.release)
                         }
                         if (release != null && release != installed?.release) {
                             Text(stringResource(Res.string.plugin_version, release.version), style = MaterialTheme.typography.titleSmall)
+                            PluginSigningText(release, choice?.officialSigner == true)
                             PluginSourceLinks(release.sourceUrl, release)
                         }
                         if (release == null && installed == null) PluginSourceLinks(plugin.sourceUrl, null)

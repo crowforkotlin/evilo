@@ -63,7 +63,7 @@ class PluginCatalogRepositoryTest {
             val release = listing.plugin.latestRelease
             records.failWrites = true
             assertFailsWith<IllegalStateException> {
-                fixture.repository.recordInstallation(listing, release, listing.plugin.descriptor(release))
+                fixture.repository.recordInstallation(listing, release, listing.plugin.descriptor(release), "d".repeat(64))
             }
             assertTrue(fixture.repository.state.value.installed.isEmpty())
             assertTrue(records.read().installed.isEmpty())
@@ -79,13 +79,102 @@ class PluginCatalogRepositoryTest {
             fixture.initialize()
             val listing = fixture.repository.state.value.listings.single()
             val release = listing.plugin.latestRelease
-            fixture.repository.recordInstallation(listing, release, listing.plugin.descriptor(release))
+            fixture.repository.recordInstallation(listing, release, listing.plugin.descriptor(release), "d".repeat(64))
             val original = fixture.repository.state.value.installed.single()
-            fixture.repository.recordInstallation(listing, release, listing.plugin.descriptor(release))
+            fixture.repository.recordInstallation(listing, release, listing.plugin.descriptor(release), "d".repeat(64))
             assertEquals(original, fixture.repository.state.value.installed.single())
             assertEquals(listOf(original), fixture.records.read().installed)
         } finally {
             fixture.transport.close()
+        }
+    }
+
+    @Test
+    fun reinstallingAnUnchangedLegacyReleasePinsItsManifestWithoutChangingItsTimestamp() = runTest {
+        val fixture = RepositoryFixture(pluginCatalog())
+        val plugin = fixture.bundled.plugins.single()
+        val legacy = InstalledPlugin(BUNDLED_SOURCE_ID, DEFAULT_BUNDLED_CATALOG_URL, plugin, plugin.latestRelease,
+            "2026-11-09T00:00:00Z", false)
+        try {
+            fixture.records.write(CatalogWrite(installed = listOf(legacy)))
+            fixture.initialize()
+            assertEquals(PluginBlockCode.METADATA_CHANGED, fixture.repository.installationBlock(legacy)?.code)
+            assertTrue(fixture.repository.installationBlockReason(legacy).orEmpty().contains("reinstall"))
+            val listing = fixture.repository.state.value.listings.single()
+            val release = listing.plugin.latestRelease
+            assertNull(fixture.repository.releaseBlockReason(listing, release))
+
+            fixture.repository.recordInstallation(listing, release, listing.plugin.descriptor(release), "d".repeat(64))
+            val approved = legacy.copy(approvedManifestSha256 = "d".repeat(64))
+            assertEquals(listOf(approved), fixture.repository.state.value.installed)
+            assertEquals(listOf(approved), fixture.records.read().installed)
+            assertNull(fixture.repository.installationBlock(approved))
+
+            val reopened = PluginCatalogRepository(fixture.records, fixture.preferences, fixture.transport, fixture.host)
+            reopened.initialize(PluginJson.encodeToString(fixture.bundled))
+            assertEquals(listOf(approved), reopened.state.value.installed)
+            assertNull(reopened.installationBlock(approved))
+        } finally { fixture.transport.close() }
+    }
+
+    @Test
+    fun theSameVersionCannotReplaceItsPinnedManifestEvenForLegacyOfficialMetadata() = runTest {
+        val fixture = RepositoryFixture(pluginCatalog())
+        try {
+            fixture.initialize()
+            val listing = fixture.repository.state.value.listings.single()
+            val release = listing.plugin.latestRelease
+            fixture.repository.recordInstallation(listing, release, listing.plugin.descriptor(release), "d".repeat(64))
+            val original = fixture.repository.state.value.installed.single()
+            assertFailsWith<IllegalArgumentException> {
+                fixture.repository.recordInstallation(listing, release, listing.plugin.descriptor(release), "e".repeat(64))
+            }
+            assertEquals(listOf(original), fixture.repository.state.value.installed)
+            assertEquals(listOf(original), fixture.records.read().installed)
+        } finally { fixture.transport.close() }
+    }
+
+    @Test
+    fun aDifferentPublisherCannotInstallTheSameIdUntilAllExistingCopiesAreRemoved() = runTest {
+        val firstPublisher = PluginSigningIdentity("publisher-test", "02".repeat(32))
+        val secondPublisher = firstPublisher.copy(publicKeyHex = "03".repeat(32))
+        for (signing in listOf(null, firstPublisher)) {
+            val first = catalogRelease().copy(signing = signing, manifestSha256 = "d".repeat(64))
+            val second = first.copy(signing = secondPublisher, manifestSha256 = "e".repeat(64))
+            val fixture = RepositoryFixture(pluginCatalog(listOf(catalogPlugin(listOf(first)))))
+            try {
+                fixture.initialize()
+                fixture.repository.addSource("https://catalog.example.com/mirror.json", false)
+                installAll(fixture)
+                val originals = fixture.repository.state.value.installed
+                assertEquals(2, originals.size)
+                fixture.custom = pluginCatalog(listOf(catalogPlugin(listOf(second))))
+                fixture.repository.refresh(originals.last().sourceId)
+                fixture.repository.addSource(CUSTOM_URL, false)
+                val targets = fixture.repository.state.value.listings.filter { it.snapshot.subscription.id != BUNDLED_SOURCE_ID }
+                for (target in targets) {
+                    assertEquals(PluginBlockCode.METADATA_CHANGED, fixture.repository.releaseBlock(target, second)?.code)
+                    assertTrue(fixture.repository.releaseBlockReason(target, second).orEmpty().contains("different publisher"))
+                    assertNull(fixture.repository.recommendedRelease(target))
+                    assertFailsWith<IllegalArgumentException> {
+                        fixture.repository.recordInstallation(target, second, target.plugin.descriptor(second), "e".repeat(64))
+                    }
+                }
+                assertEquals(originals, fixture.repository.state.value.installed)
+                assertEquals(originals, fixture.records.read().installed)
+                fixture.repository.setSourceEnabled(BUNDLED_SOURCE_ID, false)
+                assertNotNull(fixture.repository.releaseBlock(targets.first(), second))
+
+                fixture.repository.uninstall(originals.first().key, eraseData = false)
+                assertNotNull(fixture.repository.releaseBlock(targets.first(), second))
+                fixture.repository.uninstall(originals.last().key, eraseData = false)
+                for (target in targets) {
+                    assertNull(fixture.repository.releaseBlock(target, second))
+                    fixture.repository.recordInstallation(target, second, target.plugin.descriptor(second), "e".repeat(64))
+                }
+                assertEquals(targets.map { it.key }.toSet(), fixture.repository.state.value.installed.map { it.key }.toSet())
+                assertEquals(fixture.repository.state.value.installed, fixture.records.read().installed)
+            } finally { fixture.transport.close() }
         }
     }
 
@@ -97,7 +186,7 @@ class PluginCatalogRepositoryTest {
             fixture.repository.addSource(CUSTOM_URL, false)
             val listing = fixture.repository.state.value.listings.first { it.snapshot.subscription.id != BUNDLED_SOURCE_ID }
             val release = assertNotNull(fixture.repository.recommendedRelease(listing))
-            fixture.repository.recordInstallation(listing, release, listing.plugin.descriptor(release))
+            fixture.repository.recordInstallation(listing, release, listing.plugin.descriptor(release), "d".repeat(64))
             assertNull(fixture.repository.installationBlockReason(fixture.repository.state.value.installed.single()))
         } finally {
             fixture.transport.close()
@@ -134,7 +223,7 @@ class PluginCatalogRepositoryTest {
             assertEquals(urls.toSet(), listings.map { it.snapshot.subscription.url }.toSet())
             val listing = listings.first()
             val release = assertNotNull(fixture.repository.recommendedRelease(listing))
-            fixture.repository.recordInstallation(listing, release, listing.plugin.descriptor(release))
+            fixture.repository.recordInstallation(listing, release, listing.plugin.descriptor(release), "d".repeat(64))
             val installation = fixture.repository.state.value.installed.single()
             val cached = fixture.records.read().cachedCatalogs
             listings.forEach {
@@ -161,7 +250,7 @@ class PluginCatalogRepositoryTest {
             fixture.repository.addSource(CUSTOM_URL, false)
             val listing = fixture.repository.state.value.listings.single()
             val release = assertNotNull(fixture.repository.recommendedRelease(listing))
-            fixture.repository.recordInstallation(listing, release, listing.plugin.descriptor(release))
+            fixture.repository.recordInstallation(listing, release, listing.plugin.descriptor(release), "d".repeat(64))
             val changed = first.copy(permissions = PluginPermissions(api = HttpAccess(origins = setOf("https://changed.example.com"))))
             fixture.customJson = compactCatalogJson(catalogPlugin(listOf(changed))).toString()
             fixture.repository.refresh()
@@ -178,7 +267,7 @@ class PluginCatalogRepositoryTest {
         val legacyCatalog = pluginCatalog().copy(id = "evilo.official", name = "evilo Official")
         val plugin = legacyCatalog.plugins.single()
         val installation = InstalledPlugin("official", LEGACY_BUNDLED_URL, plugin, plugin.latestRelease,
-            "2026-11-09T00:00:00Z", false)
+            "2026-11-09T00:00:00Z", false, "d".repeat(64))
         val fixture = RepositoryFixture(pluginCatalog(emptyList()))
         try {
             fixture.records.write(CatalogWrite(
@@ -221,7 +310,7 @@ class PluginCatalogRepositoryTest {
             fixture.initialize()
             val listing = fixture.repository.state.value.listings.single()
             val release = listing.plugin.latestRelease
-            fixture.repository.recordInstallation(listing, release, listing.plugin.descriptor(release))
+            fixture.repository.recordInstallation(listing, release, listing.plugin.descriptor(release), "d".repeat(64))
             fixture.bundled = pluginCatalog(listOf(listing.plugin.copy(nsfw = true)))
             fixture.repository.refresh()
             val installation = fixture.repository.state.value.installed.single()
@@ -241,7 +330,7 @@ class PluginCatalogRepositoryTest {
             fixture.initialize()
             val initial = fixture.repository.state.value.listings.single()
             val first = initial.plugin.latestRelease
-            fixture.repository.recordInstallation(initial, first, initial.plugin.descriptor(first))
+            fixture.repository.recordInstallation(initial, first, initial.plugin.descriptor(first), "d".repeat(64))
             val second = catalogRelease(2).copy(minimumHostVersionCode = 2)
             fixture.bundled = pluginCatalog(listOf(catalogPlugin(listOf(first, second)).copy(forceUpdate = true)))
             fixture.repository.refresh()
@@ -266,7 +355,7 @@ class PluginCatalogRepositoryTest {
             fixture.repository.addSource(CUSTOM_URL, false)
             val custom = fixture.repository.state.value.listings.first { it.snapshot.subscription.id != BUNDLED_SOURCE_ID }
             val release = custom.plugin.latestRelease
-            fixture.repository.recordInstallation(custom, release, custom.plugin.descriptor(release))
+            fixture.repository.recordInstallation(custom, release, custom.plugin.descriptor(release), "d".repeat(64))
             fixture.bundled = pluginCatalog(listOf(catalogPlugin(listOf(catalogRelease(), catalogRelease(2))).copy(forceUpdate = true)))
             fixture.repository.refresh()
             val bundled = fixture.repository.state.value.listings.first { it.snapshot.subscription.id == BUNDLED_SOURCE_ID }
@@ -321,7 +410,7 @@ class PluginCatalogRepositoryTest {
             fixture.bundled = pluginCatalog(listOf(catalogPlugin(listOf(release.copy(sourceArchiveSha256 = "c".repeat(64))))))
             fixture.repository.refresh()
             assertFailsWith<IllegalArgumentException> {
-                fixture.repository.recordInstallation(stale, release, stale.plugin.descriptor(release))
+                fixture.repository.recordInstallation(stale, release, stale.plugin.descriptor(release), "d".repeat(64))
             }
             assertTrue(fixture.repository.state.value.installed.isEmpty())
         } finally {
@@ -338,7 +427,7 @@ class PluginCatalogRepositoryTest {
             fixture.repository.addSource(CUSTOM_URL, false)
             val listing = fixture.repository.state.value.listings.single()
             val release = listing.plugin.latestRelease
-            fixture.repository.recordInstallation(listing, release, listing.plugin.descriptor(release))
+            fixture.repository.recordInstallation(listing, release, listing.plugin.descriptor(release), "d".repeat(64))
             fixture.writePluginValue(listing.plugin.id, "retained")
             fixture.repository.removeSource(listing.snapshot.subscription.id)
             assertTrue(fixture.repository.state.value.installed.isEmpty())
@@ -356,7 +445,7 @@ class PluginCatalogRepositoryTest {
             fixture.repository.addSource(CUSTOM_URL, false)
             fixture.repository.state.value.listings.forEach { listing ->
                 val release = listing.plugin.latestRelease
-                fixture.repository.recordInstallation(listing, release, listing.plugin.descriptor(release))
+                fixture.repository.recordInstallation(listing, release, listing.plugin.descriptor(release), "d".repeat(64))
             }
             fixture.writePluginValue("test.plugin", "shared")
             val installed = fixture.repository.state.value.installed
@@ -384,7 +473,7 @@ class PluginCatalogRepositoryTest {
             fixture.initialize()
             val listing = fixture.repository.state.value.listings.single()
             val release = listing.plugin.latestRelease
-            fixture.repository.recordInstallation(listing, release, listing.plugin.descriptor(release))
+            fixture.repository.recordInstallation(listing, release, listing.plugin.descriptor(release), "d".repeat(64))
             fixture.writePluginValue(listing.plugin.id, "removed")
             failWrites = true
             assertFailsWith<IllegalStateException> { fixture.repository.uninstall(listing.key, eraseData = true) }
@@ -504,7 +593,7 @@ class PluginCatalogRepositoryTest {
         val fixture = RepositoryFixture(pluginCatalog(listOf(plugin)))
         val custom = CatalogSubscription("custom.test", CUSTOM_URL)
         val first = InstalledPlugin(BUNDLED_SOURCE_ID, DEFAULT_BUNDLED_CATALOG_URL, plugin, plugin.availableVersions.first(),
-            "2026-11-09T00:00:00Z", false)
+            "2026-11-09T00:00:00Z", false, "d".repeat(64))
         val second = first.copy(sourceId = custom.id, sourceUrl = CUSTOM_URL, installedAt = "2026-11-10T00:00:00Z")
         try {
             fixture.records.write(CatalogWrite(subscriptions = listOf(custom),
@@ -512,7 +601,7 @@ class PluginCatalogRepositoryTest {
             fixture.initialize()
             assertTrue(fixture.repository.state.value.preferredInstallations.isEmpty())
             val listing = fixture.repository.state.value.listings.first { it.key == first.key }
-            fixture.repository.recordInstallation(listing, plugin.latestRelease, plugin.descriptor(plugin.latestRelease))
+            fixture.repository.recordInstallation(listing, plugin.latestRelease, plugin.descriptor(plugin.latestRelease), "d".repeat(64))
             assertEquals(first.key, fixture.repository.state.value.preferredInstallations[plugin.id])
             assertEquals(first.key, fixture.preferences.currentSettings().preferredInstallations[plugin.id])
             assertEquals(second, fixture.repository.state.value.installed.first { it.key == second.key })
@@ -541,7 +630,7 @@ class PluginCatalogRepositoryTest {
     private suspend fun installAll(fixture: RepositoryFixture) {
         fixture.repository.state.value.listings.forEach { listing ->
             val release = listing.plugin.latestRelease
-            fixture.repository.recordInstallation(listing, release, listing.plugin.descriptor(release))
+            fixture.repository.recordInstallation(listing, release, listing.plugin.descriptor(release), "d".repeat(64))
         }
     }
 

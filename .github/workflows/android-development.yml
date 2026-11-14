@@ -1,0 +1,28 @@
+name: Android development build
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  android:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+      - name: Build development APK with the preserved official public key
+        env:
+          EVILO_PUBLIC_KEY_HEX: ${{ secrets.EVILO_PUBLIC_KEY_HEX }}
+        run: |
+          test -n "$EVILO_PUBLIC_KEY_HEX" || { printf 'Configure repository Secret EVILO_PUBLIC_KEY_HEX; no authority is generated.\n'; exit 1; }
+          ./gradlew :evilo-android:assembleDebug --no-daemon --no-configuration-cache --no-build-cache
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-development
+          path: evilo-android/build/outputs/apk/debug/*.apk
+          if-no-files-found: error

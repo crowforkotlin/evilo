@@ -136,7 +136,7 @@ class PluginHomeStore(
             }
             is PluginHomeIntent.SelectPreferredInstallation -> selectPreferred(intent.key)
             is PluginHomeIntent.ReviewRelease -> review(intent)
-            is PluginHomeIntent.ApproveInstall -> approve(intent.review)
+            is PluginHomeIntent.ApproveInstall -> approve(intent.review, intent.publisherApproved)
             is PluginHomeIntent.RequestUninstall -> if (state.value.entries[intent.key]?.installation != null && state.value.canMutate) {
                 update { it.copy(overlay = HomeOverlay.Uninstall(intent.key)) }
             }
@@ -218,19 +218,21 @@ class PluginHomeStore(
         else update { it.copy(overlay = HomeOverlay.PermissionReview(entry.key, release, intent.openAfterInstall)) }
     }
 
-    private fun approve(review: HomeOverlay.PermissionReview) {
+    private fun approve(review: HomeOverlay.PermissionReview, publisherApproved: Boolean) {
         if (!state.value.canMutate || state.value.overlay != review) return
         val entry = state.value.entries[review.key] ?: return fail("This plugin source is no longer available.")
         val listing = entry.listing ?: return fail("Refresh or enable this plugin source before installing.")
         val reason = repository.releaseBlockReason(listing, review.release)
         if (reason != null) return fail(reason)
+        if (!repository.officialRelease(review.release) && !publisherApproved)
+            return fail("Explicit publisher approval is required for this third-party release.")
         update { it.copy(overlay = null, actionError = null, notice = null,
             pages = if (review.openAfterInstall) it.pages + HomePage.PluginBrowser(entry.key) else it.pages) }
         val installed = entry.installation
         if (installed != null && installed.release == review.release && repository.installationBlockReason(installed) == null) {
             if (review.openAfterInstall) connections.open(installed)
             else update { it.copy(notice = HomeNotice(installed.key)) }
-        } else connections.install(listing, review.release, review.openAfterInstall)
+        } else connections.install(listing, review.release, review.openAfterInstall, publisherApproved)
     }
 
     private fun back() {
@@ -277,7 +279,7 @@ class PluginHomeStore(
                         "Refresh or enable this plugin source before installing.")
                     else if (release == installation?.release && release !in listing.plugin.availableVersions) openBlock
                     else repository.releaseBlock(listing, release)
-                    PluginReleaseChoice(release, block?.message, block)
+                    PluginReleaseChoice(release, block?.message, block, repository.officialRelease(release))
                 }, listing?.let(repository::recommendedRelease), openBlock?.message, openBlock)
         }
     }

@@ -15,6 +15,13 @@ const val DEFAULT_BUNDLED_CATALOG_URL =
 data class PluginAuthor(val name: String, val url: String? = null)
 
 @Serializable
+data class PluginSigningIdentity(
+    val keyId: String,
+    val publicKeyHex: String,
+    val algorithm: String = "Ed25519",
+)
+
+@Serializable
 data class PluginRelease(
     val version: String,
     val versionCode: Long,
@@ -31,6 +38,8 @@ data class PluginRelease(
     val maximumHostVersionCode: Long? = null,
     val protocol: ProtocolRequirement = ProtocolRequirement(),
     val permissions: PluginPermissions = PluginPermissions(),
+    val signing: PluginSigningIdentity? = null,
+    val manifestSha256: String? = null,
 )
 
 @Serializable
@@ -92,6 +101,7 @@ data class InstalledPlugin(
     val release: PluginRelease,
     val installedAt: String,
     val allowHttp: Boolean,
+    val approvedManifestSha256: String? = null,
 ) {
     val key: String get() = "$sourceId:${plugin.id}"
 }

@@ -242,7 +242,7 @@
     <string name="settings_image_details">错误详情</string>
     <string name="settings_image_details_description">默认折叠技术详情，地址和复制的诊断信息会脱敏。</string>
     <string name="settings_signature_authority">应用签名 authority</string>
-    <string name="settings_signature_authority_description">仅接受 App 内置 authority 签署的插件包。插件源不能添加信任密钥，签名不等于安全审查。</string>
+    <string name="settings_signature_authority_description">App 内置官方验证公钥。第三方签名版本需要逐版本明确批准，插件源不能静默授予信任。签名不等于安全审查。</string>
     <string name="settings_http_description">HTTP 需要明确的来源同意；跳转、隐式凭据和未批准媒体地址仍被拒绝。浏览器 CORS 和混合内容限制仍然适用。</string>
     <string name="settings_project">项目仓库</string>
     <string name="settings_licenses">许可证</string>
@@ -316,4 +316,10 @@
     <string name="plugin_availability_declared">地区标签来自来源作者声明，不会自动设置代理，也不保证当前网络可以访问。</string>
     <string name="plugin_recommended_release">推荐的兼容版本</string>
     <string name="plugin_view_source_copy">查看此来源副本</string>
+    <string name="plugin_signer_official">官方签名身份（安装时验证）</string>
+    <string name="plugin_signer_third_party">第三方签名身份</string>
+    <string name="plugin_signer_fingerprint">公钥 SHA-256 指纹：%1$s</string>
+    <string name="plugin_manifest_hash">签名清单 SHA-256：%1$s</string>
+    <string name="plugin_publisher_warning">来源收录不等于安全审查。公钥由发布者提供，请通过独立渠道核对指纹。本次仅批准这个版本，不批准后续更新或其他插件。</string>
+    <string name="plugin_publisher_accept">我接受此第三方签名身份，并允许安装这个版本。</string>
 </resources>

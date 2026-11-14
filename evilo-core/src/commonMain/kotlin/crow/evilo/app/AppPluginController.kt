@@ -44,15 +44,26 @@ class AppPluginController(
     private var serial = 0L
     private var loadStarted: TimeMark? = null
 
-    fun install(listing: CatalogListing, release: PluginRelease, openAfterInstall: Boolean = false) = replace(key = listing.key) { token ->
+    fun install(listing: CatalogListing, release: PluginRelease, openAfterInstall: Boolean = false,
+        publisherApproved: Boolean = false) = replace(key = listing.key) { token ->
         val current = repository.state.value.listings.firstOrNull { it.key == listing.key }
             ?: error("This plugin source is no longer available.")
         require(repository.releaseBlockReason(current, release) == null) { repository.releaseBlockReason(current, release).orEmpty() }
+        require(repository.officialRelease(release) || publisherApproved) {
+            "Explicit publisher approval is required for this third-party release."
+        }
         repository.prepareInstallation()
-        val key = acquire(current.plugin, release, current.snapshot.subscription.allowHttp, token, openAfterInstall) { session ->
+        val existing = repository.state.value.installed.firstOrNull { it.key == current.key }
+        val pinned = existing?.approvedManifestSha256?.takeIf { existing.release.versionCode == release.versionCode }
+        val key = acquire(current.plugin, release, current.snapshot.subscription.allowHttp, token, openAfterInstall,
+            approvedManifestSha256 = pinned) { session ->
             phase(token, PluginLoadPhase.RECORDING_INSTALLATION)
+            require(pinned == null || pinned == session.verifiedManifestSha256) {
+                "The signed manifest changed without a new version."
+            }
             val installed = repository.state.value.installed.firstOrNull { it.key == current.key && it.release == release }
-            if (installed == null) repository.recordInstallation(current, release, session.source.descriptor)
+            if (installed == null || installed.approvedManifestSha256 == null)
+                repository.recordInstallation(current, release, session.source.descriptor, session.verifiedManifestSha256)
             else require(repository.installationBlockReason(installed) == null) { repository.installationBlockReason(installed).orEmpty() }
             if (openAfterInstall) repository.selectPreferredInstallation(current.key)
             current.key
@@ -68,7 +79,11 @@ class AppPluginController(
         if (rememberSource && repository.state.value.preferredInstallations[current.plugin.id] != current.key)
             repository.selectPreferredInstallation(current.key)
         currentCoroutineContext().ensureActive()
-        acquire(current.plugin, current.release, current.allowHttp, token, activate = true) {
+        acquire(current.plugin, current.release, current.allowHttp, token, activate = true,
+            approvedManifestSha256 = current.approvedManifestSha256) { session ->
+            require(current.approvedManifestSha256 == session.verifiedManifestSha256) {
+                "The signed manifest differs from the installed approval."
+            }
             require(repository.installationBlockReason(current) == null) { repository.installationBlockReason(current).orEmpty() }
             current.key
         }
@@ -87,13 +102,16 @@ class AppPluginController(
     }
 
     private suspend fun acquire(plugin: crow.evilo.plugin.catalog.CatalogPlugin, release: PluginRelease,
-        allowHttp: Boolean, token: Long, activate: Boolean, accept: suspend (MediaSourceSession) -> String): String {
+        allowHttp: Boolean, token: Long, activate: Boolean, approvedManifestSha256: String? = null,
+        accept: suspend (MediaSourceSession) -> String): String {
         closeSession()
         var acquired: MediaSourceSession? = null
         var retained = false
         var failure: Throwable? = null
         try {
-            val session = sessions.connect(plugin, release, allowHttp) { phase(token, it) }
+            val session = if (approvedManifestSha256 != null)
+                sessions.connectInstalled(plugin, release, allowHttp, approvedManifestSha256) { phase(token, it) }
+            else sessions.connect(plugin, release, allowHttp) { phase(token, it) }
             acquired = session
             currentCoroutineContext().ensureActive()
             require(repository.state.value.selectedKind in session.source.descriptor.kinds) { "This release does not support the selected content type." }

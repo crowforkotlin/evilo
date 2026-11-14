@@ -10,6 +10,7 @@ import crow.evilo.network.ktor.PluginUrlPolicy
 import crow.evilo.storage.CatalogWrite
 import crow.evilo.storage.EviloPreferencesRepository
 import crow.evilo.storage.PluginCatalogStore
+import crow.wasmline.loader.WasmlineTrustedKeys
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
@@ -54,6 +55,7 @@ class PluginCatalogRepository(
     private val transport: BoundedHttpTransport,
     val host: HostDescriptor,
     private val bundledUrl: String = DEFAULT_BUNDLED_CATALOG_URL,
+    private val officialKeys: WasmlineTrustedKeys = WasmlineTrustedKeys { _, _ -> null },
 ) {
     private val parser = CatalogParser()
     private val operations = Mutex()
@@ -63,6 +65,10 @@ class PluginCatalogRepository(
     private var updateFloors = emptyMap<String, Long>()
 
     fun dismissError() { mutableState.update { it.copy(error = null) } }
+
+    fun officialRelease(release: PluginRelease): Boolean = isOfficialRelease(release, officialKeys)
+
+    private fun dataKey(pluginId: String, release: PluginRelease): String = publisherStorageKey(pluginId, release, officialKeys)
 
     suspend fun initialize(bundledJson: String) = operations.withLock {
         if (mutableState.value.initialized) return@withLock
@@ -108,6 +114,12 @@ class PluginCatalogRepository(
             parser.validate(PluginCatalog(PLUGIN_CATALOG_SCHEMA_VERSION, "stored", "Stored", "",
                 installation.plugin.updatedAt, listOf(installation.plugin)), installation.allowHttp)
             require(installation.release in installation.plugin.availableVersions) { "Stored installation has no matching release." }
+            installation.approvedManifestSha256?.let { digest ->
+                require(Regex("[0-9a-f]{64}").matches(digest) &&
+                    (installation.release.manifestSha256 == null || installation.release.manifestSha256 == digest)) {
+                    "Stored manifest approval does not match the installed release."
+                }
+            }
         }
         require(stored.updateFloors.values.all { it >= 1 }) { "Invalid stored mandatory version floors." }
         updateFloors = buildMap {
@@ -297,6 +309,14 @@ class PluginCatalogRepository(
                 PluginBlockCode.SOURCE_DISABLED else PluginBlockCode.SOURCE_MISSING, "The plugin source is removed or disabled.")
         if (release !in current.plugin.availableVersions) return PluginBlock(PluginBlockCode.METADATA_CHANGED,
             "This plugin release is no longer usable or its metadata changed.")
+        if (state.value.installed.any { it.plugin.id == current.plugin.id &&
+                dataKey(it.plugin.id, it.release) != dataKey(current.plugin.id, release) })
+            return PluginBlock(PluginBlockCode.METADATA_CHANGED,
+                "A different publisher already owns this installed plugin ID. Uninstall its copies before changing the signing identity.")
+        val pinned = state.value.installed.firstOrNull { it.key == current.key && it.release.versionCode == release.versionCode }
+        if (pinned?.approvedManifestSha256 != null && release.manifestSha256 != null &&
+            pinned.approvedManifestSha256 != release.manifestSha256)
+            return PluginBlock(PluginBlockCode.METADATA_CHANGED, "The published manifest changed without a new version. Ask the publisher for a new release.")
         if (!release.usable) return PluginBlock(PluginBlockCode.RELEASE_WITHDRAWN, "This plugin release is no longer usable.")
         if ((current.plugin.nsfw || state.value.isPluginNsfw(current.plugin.id)) && !state.value.showNsfw)
             return PluginBlock(PluginBlockCode.NSFW_HIDDEN, "This plugin is marked NSFW; enable that preference in Settings before opening it.")
@@ -318,6 +338,8 @@ class PluginCatalogRepository(
     fun installationBlockReason(installation: InstalledPlugin): String? = installationBlock(installation)?.message
 
     fun installationBlock(installation: InstalledPlugin): PluginBlock? {
+        if (installation.approvedManifestSha256 == null) return PluginBlock(PluginBlockCode.METADATA_CHANGED,
+            "Review and reinstall this legacy installation to pin its signed manifest.")
         val listing = state.value.listingByKey[installation.key]
             ?: return PluginBlock(when {
                 state.value.subscriptions.any { it.id == installation.sourceId && !it.enabled } -> PluginBlockCode.SOURCE_DISABLED
@@ -330,7 +352,8 @@ class PluginCatalogRepository(
         return releaseBlock(listing, current)
     }
 
-    suspend fun recordInstallation(listing: CatalogListing, release: PluginRelease, verified: PluginDescriptor) = operations.withLock {
+    suspend fun recordInstallation(listing: CatalogListing, release: PluginRelease, verified: PluginDescriptor,
+        verifiedManifestSha256: String? = null) = operations.withLock {
         require(releaseBlockReason(listing, release) == null) { releaseBlockReason(listing, release).orEmpty() }
         val current = requireNotNull(state.value.listingByKey[listing.key])
         require(verified.id == current.plugin.id && verified.version == release.version && verified.versionCode == release.versionCode &&
@@ -339,13 +362,25 @@ class PluginCatalogRepository(
             "The signed plugin descriptor does not match its catalog release."
         }
         val previous = mutableState.value.installed.firstOrNull { it.key == current.key }
-        if (previous?.release == release) return@withLock
+        require(verifiedManifestSha256 != null && Regex("[0-9a-f]{64}").matches(verifiedManifestSha256) &&
+            (release.manifestSha256 == null || release.manifestSha256 == verifiedManifestSha256)) { "Installation requires the verified signed manifest digest." }
+        require(previous == null || previous.release.versionCode != release.versionCode ||
+            previous.approvedManifestSha256 == null || previous.approvedManifestSha256 == verifiedManifestSha256) {
+            "The signed manifest changed without a new version."
+        }
+        if (previous?.release == release && previous.approvedManifestSha256 == verifiedManifestSha256) return@withLock
         if (previous != null) pinDefaultSources(setOf(current.key))
+        val retainedTimestamp = previous?.takeIf {
+            it.release.copy(signing = release.signing, manifestSha256 = release.manifestSha256) == release &&
+                dataKey(it.plugin.id, it.release) == dataKey(current.plugin.id, release) &&
+                (it.approvedManifestSha256 == null || it.approvedManifestSha256 == verifiedManifestSha256)
+        }?.installedAt
         val installation = InstalledPlugin(current.snapshot.subscription.id, current.snapshot.subscription.url,
-            current.plugin, release, Clock.System.now().toString(), current.snapshot.subscription.allowHttp)
+            current.plugin, release, retainedTimestamp ?: Clock.System.now().toString(),
+            current.snapshot.subscription.allowHttp, verifiedManifestSha256)
         val installed = mutableState.value.installed.filterNot { it.key == installation.key } + installation
         require(installed.size <= 256) { "At most 256 plugins can be installed." }
-        require(current.plugin.id !in records.read().pendingDataDeletes) { "Plugin data cleanup is incomplete; refresh before installing." }
+        require(dataKey(current.plugin.id, release) !in records.read().pendingDataDeletes) { "Plugin data cleanup is incomplete; refresh before installing." }
         persistAndPublish(CatalogWrite(installed = installed)) {
             mutableState.update { it.copy(installed = installed) }
         }
@@ -359,7 +394,7 @@ class PluginCatalogRepository(
         }
         pinDefaultSources(setOf(key))
         val installed = mutableState.value.installed.filterNot { it.key == key }
-        val deletedIds = if (eraseData && installed.none { it.plugin.id == previous.plugin.id }) setOf(previous.plugin.id) else emptySet()
+        val deletedIds = if (eraseData && installed.none { it.plugin.id == previous.plugin.id }) setOf(dataKey(previous.plugin.id, previous.release)) else emptySet()
         // A Room deletion record makes DataStore cleanup retryable without pretending the two stores share a transaction.
         persistAndPublish(CatalogWrite(installed = installed, pendingDataDeletes = deletedIds)) {
             mutableState.update { it.copy(installed = installed) }

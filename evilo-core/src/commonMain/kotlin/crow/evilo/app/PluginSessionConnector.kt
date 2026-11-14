@@ -17,4 +17,8 @@ data class PluginLoadTiming(val phase: PluginLoadPhase, val startedAtMs: Long, v
 fun interface PluginSessionConnector {
     suspend fun connect(plugin: CatalogPlugin, release: PluginRelease, allowHttp: Boolean,
         onPhase: (PluginLoadPhase) -> Unit): MediaSourceSession
+
+    suspend fun connectInstalled(plugin: CatalogPlugin, release: PluginRelease, allowHttp: Boolean,
+        approvedManifestSha256: String?, onPhase: (PluginLoadPhase) -> Unit): MediaSourceSession =
+        connect(plugin, release, allowHttp, onPhase)
 }

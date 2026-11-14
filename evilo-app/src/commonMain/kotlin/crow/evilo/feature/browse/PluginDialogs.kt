@@ -11,6 +11,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
+import androidx.compose.foundation.layout.Row
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -21,6 +23,11 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import crow.evilo.plugin.catalog.fingerprint
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
 import crow.evilo.app.resources.*
@@ -34,9 +41,11 @@ import org.jetbrains.compose.resources.stringResource
 
 @Composable
 internal fun PluginPermissionDialog(entry: PluginEntry, release: PluginRelease, busy: Boolean, blocked: String?,
-    openAfterInstall: Boolean, sharedPluginData: Boolean, onDismiss: () -> Unit, onApprove: () -> Unit) {
+    openAfterInstall: Boolean, sharedPluginData: Boolean, onDismiss: () -> Unit, onApprove: (Boolean) -> Unit) {
     val installed = entry.installation
     val update = installed != null && release.versionCode > installed.release.versionCode
+    val official = entry.releases.firstOrNull { it.release == release }?.officialSigner == true
+    var publisherApproved by remember(entry.key, release) { mutableStateOf(false) }
     AlertDialog(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surface,
         icon = { Icon(EviloIcons.Shield, null) },
         title = { Text(stringResource(when {
@@ -53,6 +62,11 @@ internal fun PluginPermissionDialog(entry: PluginEntry, release: PluginRelease, 
                     SelectionContainer { Text(entry.listing?.snapshot?.subscription?.url ?: installed?.sourceUrl.orEmpty(),
                         style = MaterialTheme.typography.bodySmall) }
                     PluginSourceLinks(release.sourceUrl, release)
+                    PluginSigningText(release, official)
+                    if (!official) Row {
+                        Checkbox(publisherApproved, onCheckedChange = { publisherApproved = it })
+                        Text(stringResource(Res.string.plugin_publisher_accept), style = MaterialTheme.typography.bodySmall)
+                    }
                     Text(stringResource(Res.string.plugin_safety), style = MaterialTheme.typography.bodyMedium)
                     if (entry.allowHttp) Text(stringResource(Res.string.plugin_http_warning), color = MaterialTheme.colorScheme.error)
                     Text(stringResource(Res.string.plugin_permissions), style = MaterialTheme.typography.titleMedium)
@@ -65,7 +79,7 @@ internal fun PluginPermissionDialog(entry: PluginEntry, release: PluginRelease, 
                 blocked?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
             }
         },
-        confirmButton = { Button(onClick = onApprove, enabled = !busy && blocked == null) {
+        confirmButton = { Button(onClick = { onApprove(publisherApproved) }, enabled = !busy && blocked == null && (official || publisherApproved)) {
             Text(stringResource(when {
                 openAfterInstall && update -> Res.string.plugin_accept_update_browse
                 openAfterInstall -> Res.string.plugin_accept_install_browse
@@ -76,6 +90,22 @@ internal fun PluginPermissionDialog(entry: PluginEntry, release: PluginRelease, 
             }))
         } },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(Res.string.home_cancel)) } })
+}
+
+@Composable
+internal fun PluginSigningText(release: PluginRelease, official: Boolean) {
+    Column(verticalArrangement = Arrangement.spacedBy(EviloSpacing.Small)) {
+        Text(stringResource(if (official) Res.string.plugin_signer_official else Res.string.plugin_signer_third_party),
+            style = MaterialTheme.typography.titleSmall)
+        release.signing?.let { signing -> SelectionContainer {
+            Text(stringResource(Res.string.plugin_signer_fingerprint, signing.fingerprint()), style = MaterialTheme.typography.bodySmall)
+        } }
+        release.manifestSha256?.let { digest -> SelectionContainer {
+            Text(stringResource(Res.string.plugin_manifest_hash, digest), style = MaterialTheme.typography.bodySmall)
+        } }
+        if (!official) Text(stringResource(Res.string.plugin_publisher_warning), style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error)
+    }
 }
 
 @OptIn(ExperimentalLayoutApi::class)

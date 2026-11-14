@@ -57,8 +57,8 @@ class EviloPreferencesRepository(private val dataStore: DataStore<EviloPreferenc
         }
     }
 
-    fun pluginSession(pluginId: String): PluginStorageSession =
-        PluginStorageSession(pluginId, dataStore, mutex(pluginId))
+    fun pluginSession(pluginId: String, storageKey: String = pluginId): PluginStorageSession =
+        PluginStorageSession(pluginId, dataStore, mutex(storageKey), storageKey)
 
     suspend fun erasePluginData(pluginId: String) = mutex(pluginId).withLock {
         currentCoroutineContext().ensureActive()
@@ -83,6 +83,7 @@ class PluginStorageSession internal constructor(
     private val pluginId: String,
     private val dataStore: DataStore<EviloPreferences>,
     private val operations: Mutex,
+    private val storageKey: String = pluginId,
 ) : KeyValueStore {
     private val namespace = "plugin.$pluginId"
     private val lock = StoreLock()
@@ -90,7 +91,7 @@ class PluginStorageSession internal constructor(
     private var staged = MemoryKeyValueStore()
 
     suspend fun <T> transaction(block: suspend () -> T): T = operations.withLock {
-        val initial = dataStore.data.first().pluginValues[pluginId] ?: PluginValues()
+        val initial = dataStore.data.first().pluginValues[storageKey] ?: PluginValues()
         lock.withLock {
             check(!active) { "A plugin storage transaction is already active." }
             staged = MemoryKeyValueStore(mapOf(namespace to initial.entries))
@@ -104,10 +105,10 @@ class PluginStorageSession internal constructor(
                 // Once commit starts, retain the operation mutex until DataStore acknowledges the write.
                 withContext(NonCancellable) {
                     dataStore.updateData { current ->
-                        val previous = current.pluginValues[pluginId] ?: PluginValues()
+                        val previous = current.pluginValues[storageKey] ?: PluginValues()
                         check(previous == initial) { "Plugin data changed in another app instance; retry the operation." }
                         check(previous.revision < Long.MAX_VALUE) { "Plugin storage revision overflow." }
-                        current.copy(pluginValues = current.pluginValues + (pluginId to PluginValues(previous.revision + 1, entries)))
+                        current.copy(pluginValues = current.pluginValues + (storageKey to PluginValues(previous.revision + 1, entries)))
                     }
                 }
             }

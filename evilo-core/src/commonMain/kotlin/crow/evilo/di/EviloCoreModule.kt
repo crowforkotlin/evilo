@@ -33,7 +33,7 @@ fun eviloCoreModule(
     single { EviloPreferencesRepository(get()) }
     single { createEviloHttpClient() }
     single { BoundedHttpTransport(get()) }
-    single { PluginCatalogRepository(get(), get(), get(), get()) }
+    single { PluginCatalogRepository(get(), get(), get(), get(), officialKeys = get()) }
     single { PluginSessionFactory(get(), get(), get(), get()) }
     single { AppPluginController(get(), get<PluginSessionFactory>(), appScope, debugDiagnostics) }
     single { PluginHomeStore(get(), get(), appScope) }

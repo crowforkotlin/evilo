@@ -28,6 +28,7 @@ import crow.wasmline.loader.network.WasmlineHttpStatus
 import crow.wasmline.loader.network.WasmlineNetworkClient
 import crow.wasmline.loader.network.WasmlineNetworkSink
 import kotlinx.serialization.protobuf.ProtoBuf
+import okio.ByteString.Companion.toByteString
 
 class WasmlinePluginLoader(
     private val host: HostDescriptor,
@@ -41,6 +42,8 @@ class WasmlinePluginLoader(
         sourceRevision: String,
         sourceArchiveSha256: String,
         onNegotiating: suspend () -> Unit = {},
+        expectedManifestSha256: String? = null,
+        onManifestChecked: (String) -> Unit = {},
     ): MediaSource {
         require(options.trustedKeys != null && options.manifestTtlMs == 0L) {
             "Plugin loads require explicit trusted keys and a freshly verified manifest."
@@ -48,7 +51,8 @@ class WasmlinePluginLoader(
         val network = requireNotNull(options.networkClient) { "A policy-approved package network client is required." }
         val grantedHost = if (expected.permissions.storage) host else host.copy(capabilities = host.capabilities - HOST_STORAGE_CAPABILITY)
         require(expected.protocol.incompatibility(grantedHost) == null) { expected.protocol.incompatibility(grantedHost).orEmpty() }
-        val checkedOptions = options.copy(networkClient = ManifestIdentityClient(manifestUrl, network, expected, sourceRevision, sourceArchiveSha256))
+        val checkedOptions = options.copy(networkClient = ManifestIdentityClient(manifestUrl, network, expected, sourceRevision, sourceArchiveSha256,
+            expectedManifestSha256, onManifestChecked))
         val wasmline = when (val result = WasmlineLoader.load(WasmlineSource.RemoteManifestUrl(manifestUrl), checkedOptions)) {
             is WasmlineLoadResult.Success -> result.wasmline
             is WasmlineLoadResult.Failure -> throw SourcePluginLoadException(result.failure)
@@ -74,12 +78,14 @@ class WasmlinePluginLoader(
     }
 }
 
-private class ManifestIdentityClient(
+internal class ManifestIdentityClient(
     private val manifestUrl: String,
     private val delegate: WasmlineNetworkClient,
     private val expected: PluginDescriptor,
     private val sourceRevision: String,
     private val sourceArchiveSha256: String,
+    private val expectedManifestSha256: String?,
+    private val onManifestChecked: (String) -> Unit,
 ) : WasmlineNetworkClient {
     override suspend fun fetch(url: String): WasmlineHttpResponse = delegate.fetch(url).also {
         if (isManifest(url) && it.statusCode in 200..299) checkManifest(it.bytes)
@@ -94,6 +100,11 @@ private class ManifestIdentityClient(
 
     private fun checkManifest(bytes: ByteArray) {
         require(bytes.size <= 2 * 1024 * 1024) { "Plugin manifest exceeds its byte limit." }
+        val digest = bytes.toByteString().sha256().hex()
+        require(expectedManifestSha256 == null || digest == expectedManifestSha256) {
+            "The signed manifest changed; select a new release and review it before installation."
+        }
+        onManifestChecked(digest)
         val envelope = ProtoBuf.decodeFromByteArray(SignedManifestEnvelope.serializer(), bytes)
         require(envelope.algorithm == "Ed25519") { "Plugin signatures must use Ed25519." }
         val manifest = ProtoBuf.decodeFromByteArray(WasmlineManifest.serializer(), envelope.payload)

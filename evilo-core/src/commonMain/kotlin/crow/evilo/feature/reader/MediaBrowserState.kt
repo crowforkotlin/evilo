@@ -10,6 +10,7 @@ import crow.evilo.plugin.api.SourceRequest
 
 interface MediaSourceSession {
     val source: MediaSource
+    val verifiedManifestSha256: String? get() = null
     fun approveImageRequest(url: String, headers: Map<String, String>): SourceRequest
     suspend fun imageBytes(url: String, headers: Map<String, String>): ByteArray
     fun externalStreamUrl(stream: MediaStream): String

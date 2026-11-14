@@ -242,7 +242,7 @@
     <string name="settings_image_details">Error details</string>
     <string name="settings_image_details_description">Technical details are collapsed by default. Addresses and copied diagnostics are redacted.</string>
     <string name="settings_signature_authority">Application signing authority</string>
-    <string name="settings_signature_authority_description">Only packages signed by the authority embedded in this App are accepted. Sources cannot add trusted keys. A signature is not a safety review.</string>
+    <string name="settings_signature_authority_description">The App embeds the official verification key. Third-party signatures require explicit approval for each version; sources cannot silently grant trust. Signatures do not establish code safety.</string>
     <string name="settings_http_description">HTTP requires explicit source consent. Redirects, implicit credentials and unapproved media addresses remain blocked. Browser CORS and mixed-content rules still apply.</string>
     <string name="settings_project">Project repository</string>
     <string name="settings_licenses">Licenses</string>
@@ -316,4 +316,10 @@
     <string name="plugin_availability_declared">Region labels are declared by the source author. They do not configure a proxy or guarantee access.</string>
     <string name="plugin_recommended_release">Recommended compatible release</string>
     <string name="plugin_view_source_copy">View this source copy</string>
+    <string name="plugin_signer_official">Official signing identity (verified during installation)</string>
+    <string name="plugin_signer_third_party">Third-party signing identity</string>
+    <string name="plugin_signer_fingerprint">Public key SHA-256 fingerprint: %1$s</string>
+    <string name="plugin_manifest_hash">Signed manifest SHA-256: %1$s</string>
+    <string name="plugin_publisher_warning">Source inclusion is not a safety review. This public key is supplied by the publisher; compare its fingerprint through an independent channel. Approval is only for this version, not future updates or another plugin.</string>
+    <string name="plugin_publisher_accept">I accept this third-party signing identity and allow installation of this version.</string>
 </resources>

@@ -266,7 +266,8 @@ private fun PluginHomeScreen(state: PluginHomeState, images: EviloImages, host: 
                 blocked = if (choice == null) stringResource(Res.string.plugin_release_changed) else pluginBlockLabel(choice.block) ?: choice.blocked,
                 openAfterInstall = overlay.openAfterInstall,
                 sharedPluginData = state.catalog.installed.any { it.plugin.id == entry.plugin.id },
-                onDismiss = { dispatch(PluginHomeIntent.DismissOverlay) }, onApprove = { dispatch(PluginHomeIntent.ApproveInstall(overlay)) })
+                onDismiss = { dispatch(PluginHomeIntent.DismissOverlay) },
+                onApprove = { publisherApproved -> dispatch(PluginHomeIntent.ApproveInstall(overlay, publisherApproved)) })
         }
         is HomeOverlay.Uninstall -> state.entries[overlay.key]?.let { entry ->
             PluginUninstallDialog(entry.plugin.name, sourceName(state, entry.sourceId),

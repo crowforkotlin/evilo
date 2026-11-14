@@ -203,6 +203,54 @@ class CatalogParserTest {
     }
 
     @Test
+    fun publisherSigningRequiresAPerReleaseManifestDigest() {
+        val signing = PluginSigningIdentity("publisher-test", "02".repeat(32))
+        val input = compactCatalogJson().editFirstRelease { release ->
+            JsonObject((release - "manifestSha256") + ("signing" to PluginJson.encodeToJsonElement(signing)))
+        }
+        val missing = assertFailsWith<IllegalArgumentException> { parser.parse(input.toString(), false) }
+        assertEquals("Publisher-signed releases must pin their manifest SHA-256.", missing.message)
+        assertJsonRejected(input.editFirstRelease { JsonObject(it + ("manifestSha256" to JsonNull)) })
+
+        val digest = "d".repeat(64)
+        val parsed = parser.parse(input.editFirstRelease {
+            JsonObject(it + ("manifestSha256" to JsonPrimitive(digest)))
+        }.toString(), false).plugins.single().latestRelease
+        assertEquals(signing, parsed.signing)
+        assertEquals(digest, parsed.manifestSha256)
+    }
+
+    @Test
+    fun inheritedPublisherSigningStillRequiresADigestOnEveryRelease() {
+        val signing = PluginSigningIdentity("publisher-test", "02".repeat(32))
+        val releases = listOf(catalogRelease(), catalogRelease(2)).map { it.copy(manifestSha256 = "d".repeat(64)) }
+        val input = compactCatalogJson(catalogPlugin(releases)).editPlugin { plugin ->
+            JsonObject(plugin + mapOf(
+                "signing" to PluginJson.encodeToJsonElement(signing),
+                "availableVersions" to JsonArray(plugin.getValue("availableVersions").jsonArray.map {
+                    JsonObject(it.jsonObject - "signing")
+                }),
+            ))
+        }
+        val parsed = parser.parse(input.toString(), false).plugins.single().availableVersions
+        assertEquals(listOf(signing, signing), parsed.map { it.signing })
+        assertEquals(listOf("d".repeat(64), "d".repeat(64)), parsed.map { it.manifestSha256 })
+        assertJsonRejected(input.editFirstRelease { JsonObject(it - "manifestSha256") })
+        assertJsonRejected(input.editFirstRelease { JsonObject(it + ("manifestSha256" to JsonNull)) })
+    }
+
+    @Test
+    fun manifestDigestsMustBeLowercaseSha256ButLegacyOfficialCatalogsMayOmitThem() {
+        val legacy = catalogRelease()
+        assertEquals(legacy, parser.parse(PluginJson.encodeToString(pluginCatalog()), false).plugins.single().latestRelease)
+        val publisher = legacy.copy(signing = PluginSigningIdentity("publisher-test", "02".repeat(32)))
+        for (digest in listOf("", "d".repeat(63), "d".repeat(65), "D".repeat(64), "g".repeat(64))) {
+            assertRejectedRelease(publisher.copy(manifestSha256 = digest))
+            assertRejectedRelease(legacy.copy(manifestSha256 = digest))
+        }
+    }
+
+    @Test
     fun requiredStorageCapabilityNeedsStoragePermission() {
         val release = catalogRelease()
         assertRejectedRelease(release.copy(protocol = release.protocol.copy(requiredCapabilities = setOf(HOST_STORAGE_CAPABILITY))))

@@ -61,6 +61,13 @@ class CatalogParser {
                 "A release must provide a source ZIP or tar.gz archive, not just Wasm binaries."
             }
             require(Regex("[0-9a-f]{64}").matches(release.sourceArchiveSha256)) { "A release must provide its source archive SHA-256." }
+            release.manifestSha256?.let { require(Regex("[0-9a-f]{64}").matches(it)) { "Invalid manifest SHA-256." } }
+            release.signing?.let { signing ->
+                require(signing.algorithm == "Ed25519" && signing.keyId.length in 1..128 &&
+                    Regex("[A-Za-z0-9_.-]+").matches(signing.keyId) &&
+                    Regex("[0-9a-f]{64}").matches(signing.publicKeyHex)) { "Invalid publisher signing identity." }
+                require(release.manifestSha256 != null) { "Publisher-signed releases must pin their manifest SHA-256." }
+            }
             require(!release.protocol.requiredCapabilities.contains("storage.kv.v1") || release.permissions.storage) {
                 "Required storage capability must have a matching storage permission."
             }

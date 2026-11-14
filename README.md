@@ -114,16 +114,23 @@ grouped by signed plugin ID while every action retains `sourceId:pluginId`.
 The default source is an explicit saved choice or the oldest installation, never
 the mirror with the highest version. An unavailable default requires explicit
 source selection; search and single-source filtering do not change the default.
-Version floors and approved permissions remain source-specific. The strictest
-known NSFW classification among installed sources applies to all copies.
+Version floors and approved permissions remain source-specific. Same-ID copies
+must use the same verified publisher identity; another publisher is blocked until
+all installed copies of that ID are uninstalled, including disabled copies.
+Third-party key/value data is isolated by public-key fingerprint and plugin ID.
+The strictest known NSFW classification among installed sources applies to all copies.
 
 Installation requires explicit permission review. Install stays on the management
 page and closes the verification session; Install and browse reuses that verified
 session for the works catalog. Opening still fetches and verifies a signed remote
 manifest, but content-addressed modules can reuse Wasmline's hash-checked artifact
-cache (128 MiB configured limit). Installation does not imply offline availability. The same installed release
-retains its original record and timestamp. Returning or replacing a load cancels
-obsolete work and closes acquired handles before another session is accepted.
+cache (128 MiB configured limit). Installation pins the verified SHA-256 of the
+exact signed manifest bytes; opening rejects changed bytes even if the same
+publisher signs them. Installation does not imply offline availability. Legacy
+installations without that digest require one explicit review/reinstall; an
+unchanged release retains its original installation timestamp. Returning or
+replacing a load cancels obsolete work and closes acquired handles before another
+session is accepted.
 
 Predictive Back previews Reader -> details -> works catalog -> previous home page
 using full-page scale/rounded corners/edge-aware movement matching the default
@@ -153,11 +160,15 @@ Release shows generic loading text and no timing controls. The signed loader doe
 not expose individual crypto/runtime timestamps, so cached-module checks and
 runtime creation may share one measured phase.
 
-Users do not enter Ed25519 keys, key IDs, or individual WLM URLs. Installations
-require a compatible release, matching signed source provenance, the app authority
-signature, and explicit permission approval. A valid signature does not prove safety.
-Other authors may maintain JSON catalogs, but cannot supply trusted keys. Catalogs
-use the same release-signature and permission requirements regardless of source.
+Users subscribe to catalog URLs rather than entering Ed25519 keys, key IDs, or
+individual WLM URLs. Every installation requires a compatible release, matching
+signed source provenance, a valid Ed25519 signature, and explicit permission approval.
+Official releases use the public verification key supplied when building the app.
+Third-party releases declare their own signing identity and exact signed-manifest
+SHA-256; users explicitly approve the exact version, publisher fingerprint, and
+permissions before execution. Declared keys apply only to that release, not an
+application-wide trust list. Catalog inclusion is not certification, and a valid
+signature does not prove safety.
 
 Image/text reading code is shared. Video URLs open externally after approval;
 custom playback headers are unsupported. Library/history, saved reading progress,
@@ -181,9 +192,11 @@ addresses.
    without installing or executing the listed plugins.
 3. Open the source's catalog and select a supported content type. NSFW entries
    remain hidden unless enabled in More -> Settings -> Browse and content.
-4. Open a plugin's details, select a compatible release, review its actual source
-   links and permissions, and approve installation. Install keeps this page;
-   Install and browse explicitly enters the works catalog after verification.
+4. Open a plugin's details, select a compatible release, and review its actual
+   source links, signer, and permissions. For a third-party release, compare the
+   displayed publisher fingerprint with an independent publisher channel and
+   explicitly accept that exact version/fingerprint/permissions. Install keeps
+   this page; Install and browse enters works after signature/digest verification.
 5. Tap its installed Browse row to enter works directly. The separate Info button
    manages versions, updates, permissions, source copies, and per-source uninstall.
    No WLM URL, key ID, or Ed25519 key is entered by the user.
@@ -219,14 +232,20 @@ updating old releases without changing their permissions.
 The template's release exporter supplies a usable `plugins.json`, actual source
 archive/hash, signed `manifest.wlm`, and content-addressed `artifacts/` directory.
 Publish that output directly or copy its release metadata into your own catalog;
-do not invent hashes or source commits. All downloads must be served without
-redirects. Independent catalogs still require packages signed by the authority
-embedded in the app; they cannot add their own trusted keys. Keep provider code
-and artifacts outside evilo. See the template README for export commands.
+do not invent hashes or source commits. Third-party publishers sign each release
+with their own private key and declare `signing` (Ed25519 `keyId` and 32-byte
+`publicKeyHex`) plus `manifestSha256`, the SHA-256 of the exact signed manifest
+bytes. Signing may inherit from the plugin, but every release needs its own digest.
+Neither a subscription nor the declaration grants trust: users approve each new
+version, fingerprint, and permissions before execution. A changed key is a publisher
+change, not a transparent update; same-ID installations must be uninstalled first.
+Unsigned packages remain rejected. All downloads must be served without redirects.
+Keep provider code, artifacts, and private keys outside evilo. See the template
+README for export commands.
 
 ## Configuration
 
-| File | Owned values |
+| File or build input | Owned values |
 | --- | --- |
 | `gradle/libs.versions.toml` | Dependency/compiler versions, SDK levels, JDK, SDK version |
 | `project.properties` | App identity, release version/code, iOS deployment target |
@@ -234,13 +253,14 @@ and artifacts outside evilo. See the template README for export commands.
 | `gradle/wrapper/gradle-wrapper.properties` | Gradle distribution/checksum |
 | `evilo-ios/Configuration/Config.xcconfig` | Apple signing and shared property mappings |
 | `plugin-repository/plugin.json` | Default bundled catalog, editable by publishers |
+| `EVILO_PUBLIC_KEY_HEX` / external `public.key` | Official Ed25519 public verification key supplied to app configuration generation |
 
 `project.properties` remains plain Java/Xcode-compatible `KEY=value` assignments.
 Dependency versions are not duplicated in module scripts. `wasmline.localPath`
 is an optional composite, never a committed absolute checkout path. It may
 execute upstream tasks and requires that checkout's toolchain/artifacts.
 
-## SDK, authority, and storage
+## SDK, signing, and storage
 
 The SDK coordinate is `io.github.crowforkotlin.evilo:evilo-library:1.0.0`.
 Templates consume this library rather than copying models/protocols. Until
@@ -250,8 +270,10 @@ serialized protocol and service packages; it does not change the bridge ABI.
 
 `evilo-core` owns plugin connections and reader state without depending on Compose.
 Sessions return permission-checked image bytes; `evilo-app` validates image headers
-before Coil decodes them. The app supplies its generated public signing authority to
-`PluginSessionFactory`; neither the core nor catalogs choose replacement keys.
+before Coil decodes them. The app supplies its build-configured official public
+key to `PluginSessionFactory`. `releaseVerificationKeys()` selects either that
+legacy official lookup or the reviewed release's declared publisher key; it never
+adds a catalog key to a global trust list.
 
 `EviloPluginService` uses synchronous fixed JSON envelopes; `EviloHostService`
 provides capabilities and private key/value storage. Required major/minor,
@@ -260,19 +282,45 @@ construction/parsing is separate from async host transport. Continuations carry
 explicit context; service signatures do not change for optional fields. Legacy
 manga API 2 remains an SDK adapter, not an installable API-2-only package format.
 
-`:evilo-app:generatePluginSigningKeys` creates/preserves one external Ed25519
-release-family authority, normally under `~/.evilo/signing`. App compilation
-uses it and embeds only the public key. Keys are never overwritten; incomplete
-or mismatched authority files require restoration. Templates check and reuse
-this authority, not their own or old preview keys. A shared release family must
-preserve the same authority across app updates, not generate one per phone.
+App compilation runs `:evilo-app:generateEviloAppConfiguration` and requires an
+existing official Ed25519 public key: set `EVILO_PUBLIC_KEY_HEX` to its raw 32-byte
+hexadecimal value (64 hexadecimal characters), or provide an existing external
+`public.key`. The environment value takes precedence. Without it, the file is
+read from `~/.evilo/signing/public.key`, or from the directory selected by
+`-Pevilo.signingKeyDirectory=/absolute/external/directory`. Only the normalized
+public key and official key ID `evilo-root-v1` are embedded. A missing or invalid
+public key fails the build; compilation never generates keys or reads the
+private key. Keep the official key stable across app releases to preserve legacy
+official-package verification and data identity.
 
-Only the authority operator signs releases. Independent authors do not receive
-private keys. Use the same `evilo.signingKeyDirectory` override across app/provider
-builds. Back up keys outside repositories; never print, commit, archive, or upload
-private material. Custom catalogs cannot change the trust authority.
+`:evilo-app:generatePluginSigningKeys` remains an explicitly invoked operator task
+for creating/preserving an external official pair; it is not a compilation
+dependency or an automatic setup step. App builders need only the public key.
+`.github/workflows/android-development.yml` is a manual-only Android development
+build. Configure the repository Secret `EVILO_PUBLIC_KEY_HEX`; it builds a
+debug APK artifact, not an app release. The public key remains extractable from
+the APK; using a Secret avoids a source literal, not reverse engineering.
+No signing private key belongs in the app build environment.
 
-Plugin storage is persistent and scoped by signed ID: default 1 MiB total,
+Official operators and third-party publishers retain their own private material
+outside repositories, resources, source archives, and catalogs; never print,
+commit, cache, or publish it. A publisher may supply their preserved seed through
+a private GitHub Actions Secret for signing, never through committed source. Independent publishers do not need access to the
+official private key. Legacy releases without `signing` still require an official
+signature; they are not an unsigned-loading fallback.
+
+Installation records retain the reviewed release's signing identity, permissions,
+and verified manifest digest. Every third-party version requires explicit review.
+A fingerprint is the lowercase SHA-256 of the raw public-key bytes, not of its
+hexadecimal text or key ID; compare it through an independent publisher channel.
+Initial acceptance does not authenticate a real-world identity or certify safety.
+
+Plugin storage is persistent and scoped by verified publisher plus signed ID:
+official releases preserve the legacy ID-only namespace; third-party storage uses
+`publisher:<public-key fingerprint>:<plugin ID>`. Versions and subscriptions of the
+same publisher/ID share data; another publisher cannot read retained data by
+claiming that ID. The guest still accesses only `plugin.<plugin ID>`; the host
+selects the persistent storage key. Default quotas are 1 MiB total,
 256 entries, 64 KiB/value, and 128-character keys. It is not encrypted credential
 storage. Synchronous guest writes stage values in the current host operation;
 successful operations commit with DataStore's suspending `updateData`. Failure or
@@ -310,7 +358,7 @@ requests. Authorizing an APK build/install does not authorize other targets or t
 | Operation | Command from this repository |
 | --- | --- |
 | Android debug APK | `./gradlew :evilo-android:assembleDebug` |
-| Preserve signing authority | `./gradlew :evilo-app:generatePluginSigningKeys` |
+| Explicit official signing-pair setup (operator only; never automatic) | `./gradlew :evilo-app:generatePluginSigningKeys` |
 | Desktop compilation | `./gradlew :evilo-desktop:compileKotlin` |
 | Desktop app | `./gradlew :evilo-desktop:run` |
 | Browser Wasm distribution | `./gradlew :evilo-web:wasmJsBrowserDistribution` |
@@ -320,6 +368,8 @@ requests. Authorizing an APK build/install does not authorize other targets or t
 | Catalog/storage/HTTP/runtime/controller tests | `./gradlew :evilo-core:jvmTest` |
 | Image decoder, request approval, and image-scope tests | `./gradlew :evilo-app:jvmTest` |
 
+App compilation requires `EVILO_PUBLIC_KEY_HEX` or the existing external
+`public.key` described above; do not run key generation as a build prerequisite.
 Android needs the configured SDK and JDK. iOS uses
 `evilo-ios/iosApp.xcodeproj`; its build phase invokes
 `:evilo-app:embedAndSignAppleFrameworkForXcode`. Browsers obey CORS/mixed-content

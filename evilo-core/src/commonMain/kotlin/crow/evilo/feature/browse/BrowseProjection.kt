@@ -130,8 +130,9 @@ fun hasReleaseConflict(entries: List<PluginEntry>): Boolean {
     return releases.groupBy { it.second.versionCode }.values.any { versions ->
         versions.any { (source, release) -> versions.any { (otherSource, otherRelease) ->
             source != otherSource && listOf(release.version, release.kinds, release.languages, release.protocol, release.permissions,
-                release.sourceRevision, release.sourceArchiveSha256) != listOf(otherRelease.version, otherRelease.kinds,
-                otherRelease.languages, otherRelease.protocol, otherRelease.permissions, otherRelease.sourceRevision, otherRelease.sourceArchiveSha256)
+                release.sourceRevision, release.sourceArchiveSha256, release.signing, release.manifestSha256) != listOf(otherRelease.version, otherRelease.kinds,
+                otherRelease.languages, otherRelease.protocol, otherRelease.permissions, otherRelease.sourceRevision, otherRelease.sourceArchiveSha256,
+                otherRelease.signing, otherRelease.manifestSha256)
         } }
     }
 }

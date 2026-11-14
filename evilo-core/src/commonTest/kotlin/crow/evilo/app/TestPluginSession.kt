@@ -9,7 +9,8 @@ import crow.evilo.plugin.api.PluginOperation
 import crow.evilo.plugin.api.PluginResult
 import crow.evilo.plugin.api.SourceRequest
 
-internal class TestPluginSession(descriptor: PluginDescriptor, private val closeFailure: Exception? = null) : MediaSourceSession {
+internal class TestPluginSession(descriptor: PluginDescriptor, private val closeFailure: Exception? = null,
+    override val verifiedManifestSha256: String = "d".repeat(64)) : MediaSourceSession {
     var closeCalls = 0
     override val source = object : MediaSource {
         override val descriptor = descriptor

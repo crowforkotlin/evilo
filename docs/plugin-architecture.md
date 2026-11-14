@@ -2,8 +2,9 @@
 
 ## Repository ownership
 
-`evilo` owns the application, the protocol SDK, catalog format, signing authority,
-network approvals, persistence, and Wasmline loading. It contains no source-site
+`evilo` owns the application, the protocol SDK, catalog format, official-key
+configuration, per-release publisher approval, network approvals, persistence,
+and Wasmline loading. It contains no source-site
 implementation or guest binary. Source-site implementations and release files
 belong in independent `evilo-plugin-<provider>` repositories, not host code,
 resources, build configuration, or documentation. `evilo-plugin-template` is an
@@ -23,8 +24,9 @@ theme/resource, Coil loader, and image header limits; `evilo-core` contains cata
 storage, loading, sessions, and controllers; `evilo-library` contains portable
 models and the plugin/host protocol. Dependencies flow app to core to library.
 Sessions return permission-checked image bytes rather than Compose types.
-The app injects its generated public trust authority into the core session
-factory. Existing model/service packages and JSON envelopes remain unchanged.
+The app injects its build-supplied official public verification key into the core
+session factory. Reviewed third-party releases use only their declared key for
+that release. Existing model/service packages and JSON envelopes remain unchanged.
 `docs/application-architecture.md` describes the shared MVI stores, isolated Koin
 application, Ktor transport, typed DataStore, and Room3 platform bindings.
 
@@ -56,25 +58,52 @@ Changing a bridge method needs an explicit ABI compatibility decision, not just
 an additive JSON field. Optional extension fields/capabilities must have defined
 fallback behavior; unknown required capabilities fail before execution.
 
-## Signing authority
+## Official and third-party signing
 
-The application build generates one Ed25519 authority pair outside both
-repositories. Only its public key is compiled into the application. The template
-uses that authority's private-key file and reads its public authority metadata;
-the evilo-app's current key ID is `evilo-root-v1`. It never generates a replacement key.
-Packages signed by another authority are rejected.
-Users cannot enter public keys, and catalogs cannot add trusted keys.
+App compilation requires the official Ed25519 public key supplied through
+`EVILO_PUBLIC_KEY_HEX` or an existing external `public.key`. The environment value
+takes precedence; otherwise the file is read from `~/.evilo/signing/public.key`,
+with its directory overridable by `-Pevilo.signingKeyDirectory=/absolute/external/directory`.
+`GenerateEviloAppConfiguration` accepts a raw 32-byte hexadecimal public key,
+normalizes it, and embeds only public material with key ID `evilo-root-v1`.
+Missing or invalid public material fails the build. Compilation does not depend
+on `generatePluginSigningKeys`, create an authority, or read a private key.
+The separately invoked key-generation task is for official operators only, not
+an automatic app-build prerequisite. Preserve the official verification key
+across app releases; changing it invalidates legacy official signatures and may
+change storage identity. See [README configuration](../README.md#sdk-signing-and-storage).
 
-This is an application-release authority, not a different key for every phone.
-Per-installation keys could not verify the same publicly distributed package.
-Release builders must preserve the authority pair across application releases.
-Independent developers submit source and artifacts to the authority operator for
-signing; the private key must not be shared or committed. A development
-build using another authority cannot load packages from the release authority.
+Official packages use the embedded public key. Third-party publishers sign with
+their own private key and declare `signing` (`algorithm: Ed25519`, `keyId`, raw
+32-byte lowercase `publicKeyHex`) and `manifestSha256` on each release. Signing
+may inherit from the plugin, but the exact signed-manifest digest is required per
+release. Neither catalog inclusion nor subscription grants trust. The install
+review displays the exact version, publisher fingerprint, and requested permissions;
+third-party execution requires explicit acceptance of all three. The fingerprint
+is the lowercase SHA-256 of the raw public-key bytes, not the key ID or hexadecimal
+text. Compare it through an independent publisher channel; initial acceptance
+cannot establish a real-world identity.
 
-A valid signature identifies the signing authority; it does not prove that code
-is harmless. Catalog metadata cannot grant network/storage access. Every
-installation shows the release's permissions and requires explicit consent.
+`releaseVerificationKeys()` in `PluginPublisher.kt` confines a declared key to
+that release and matching algorithm/key ID. It does not extend an app-wide trust
+list. Omitted signing metadata is only the legacy official-key fallback, never an
+unsigned-loading path. Wasmline signature verification remains mandatory for both
+official and third-party packages; declared keys alone do not verify a signature.
+Publishers keep private keys outside host/plugin repositories, resources, catalogs,
+and source archives. Independent authors never need the official private key.
+
+Installation records preserve the approved release's signing declaration, permissions,
+and SHA-256 of the exact verified signed manifest bytes. Installed loads use that
+recorded key and digest, not a replacement from a refreshed catalog. Different
+remote bytes are rejected even if signed by the same publisher; changed code needs
+a new version/code and review. Legacy installations lacking a pinned digest are
+blocked until explicit review/reinstall; an unchanged release keeps its original
+timestamp. A changed publisher key requires uninstalling all existing same-ID
+copies before installation, including disabled-source copies.
+
+A valid signature identifies a key, not harmless code. Catalog metadata cannot
+grant network/storage access. Every installation requires explicit release
+permission consent; every new third-party version requires publisher review.
 
 ## Catalogs and releases
 
@@ -103,8 +132,11 @@ with a source archive when the publisher supplies real release URLs.
 `docs/plugin-catalog.md` documents independent hosting and the compact format.
 The signed manifest binds the runtime descriptor, source revision, and
 archive hash. An identity-checking network wrapper compares those declarations
-before Wasmline creates the runtime; unchanged bytes still undergo upstream
-signature/artifact-hash verification. The wrapper is not a signature verifier.
+and the expected exact manifest digest before Wasmline creates the runtime;
+unchanged bytes still undergo upstream signature/artifact-hash verification.
+The wrapper is not a signature verifier. Third-party declarations require a
+catalog digest; legacy official catalogs may omit it, but installation still
+records the verified bytes' digest and requires it for every later open.
 Source-link availability, archive contents, and reproducible builds still require
 publisher review; the host does not inspect source archives automatically.
 
@@ -174,14 +206,20 @@ is harmless.
 
 Host persistence stores source subscriptions, selected media kind, NSFW/duplicate
 preferences, default installation choices, installations, and approvals.
-Plugin key/value storage is durable, isolated by signed plugin ID,
-bounded by key/value/count/total quotas, and available only after storage consent.
-It is not a credential vault or a filesystem API. Plugins cannot choose their
-namespace or access host preferences or another plugin's values.
+Plugin key/value storage is durable, isolated by verified publisher and signed
+plugin ID, bounded by key/value/count/total quotas, and available only after
+storage consent. Official releases retain the legacy ID-only persistent key;
+third-party keys are `publisher:<public-key fingerprint>:<plugin ID>`.
+`PluginSessionFactory` selects that key through `publisherStorageKey()` and passes
+it to `EviloPreferencesRepository.pluginSession(pluginId, storageKey)`. The guest
+still accesses only `plugin.<plugin ID>` and cannot select the persistent key,
+read host preferences, or access another publisher's retained values.
+It is not a credential vault or a filesystem API.
 The current quotas are 1 MiB of UTF-8 key/value bytes, 256 entries, 64 KiB per
-value, and keys up to 128 characters. Versions/subscriptions of the same signed
-plugin ID share that namespace. Storage migration belongs to the plugin; there
-is no automatic account/login synchronization or encrypted credential storage.
+value, and keys up to 128 characters. Versions/subscriptions of the same
+publisher/ID share data; changing publisher does not migrate retained values.
+Storage migration belongs to the plugin; there is no automatic account/login
+synchronization or encrypted credential storage.
 
 DataStore `1.3.0` stores preferences and plugin namespaces as typed Protobuf, with
 a 32 MiB aggregate limit. `PluginStorageSession.transaction` loads the namespace
@@ -191,7 +229,7 @@ The callback's `writeValue(true)` acknowledges a staged write, not synchronous
 disk durability. Failure/cancellation before commit discards staged writes. Once
 commit starts, it finishes under `NonCancellable` without releasing the operation
 mutex early; a completed durable write cannot be rolled back by cancellation.
-Per-ID mutexes serialize sessions; namespace revisions reject conflicting writes
+Per-persistent-key mutexes serialize sessions; namespace revisions reject conflicting writes
 from another app instance. Erasing a namespace increments its revision rather
 than reusing it.
 Runtime disposal waits for operations but does not depend on reading DataStore.
@@ -226,7 +264,10 @@ lists Settings, Sources, Safety, and About; Settings owns content preferences an
 raw installation management. Compact root pages use a bottom bar; expanded pages
 use a rail. Secondary phone pages hide the bottom bar, and works/reading hides both.
 
-Duplicate merging affects display only within the app's single signing authority.
+Duplicate merging affects display only among verified same-ID/same-publisher
+installations. `PluginCatalogRepository.releaseBlock()` blocks another publisher's
+same-ID release until every installed copy of that ID is removed, even if its
+source is disabled. Matching catalog IDs/names/icons do not grant identity.
 Actions retain `sourceId:pluginId`, saved defaults/oldest installations determine
 source choice, and unavailable choices require explicit selection without automatic
 fallback. Floors and permissions are not merged; NSFW uses the strictest known

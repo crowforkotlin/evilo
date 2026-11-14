@@ -23,7 +23,9 @@ val pluginKeys = tasks.register<GenerateEviloPluginKeys>("generatePluginSigningK
     outputs.upToDateWhen { false }
 }
 val appConfiguration = tasks.register<GenerateEviloAppConfiguration>("generateEviloAppConfiguration") {
-    publicKeyFile.set(pluginKeys.flatMap { it.keyDirectory.file("public.key") })
+    val supplied = providers.environmentVariable("EVILO_PUBLIC_KEY_HEX")
+    publicKeyHex.set(supplied)
+    if (!supplied.isPresent) publicKeyFile.set(layout.file(provider { eviloPluginKeyDirectory().resolve("public.key") }))
     appVersion.set(eviloProperty("EVILO_VERSION_NAME"))
     appVersionCode.set(eviloProperty("EVILO_VERSION_CODE").toLong())
     outputDirectory.set(layout.buildDirectory.dir("generated/eviloConfiguration"))

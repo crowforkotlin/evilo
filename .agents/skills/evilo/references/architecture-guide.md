@@ -19,7 +19,7 @@ the evilo repository root. For module/source-set/build changes, use
 | kotlinx.serialization | `evilo-library/src/commonMain/kotlin/crow/evilo/plugin/api/PluginProtocol.kt`, core `storage/EviloPreferences.kt` | Keep JSON protocol/catalog models separate from Protobuf settings. Unknown optional JSON fields remain tolerated; format/protocol compatibility still applies. |
 | DataStore / Okio | `evilo-core/src/commonMain/kotlin/crow/evilo/storage/EviloPreferencesRepository.kt`, app `AppStorage.kt` and platform bindings | Store settings/plugin KV as typed Protobuf. Guest callbacks access staged memory; host operations commit asynchronously. Do not reset corrupted data or fall back to memory. |
 | Room3 / KSP / SQLite | `evilo-core/src/commonMain/kotlin/crow/evilo/storage/EviloDatabase.kt`, `evilo-core/build.gradle.kts`, app platform storage bindings | Catalog subscriptions/cache/installations/floors/deletion records use the transactional DAO. Preserve decimal-text version codes for Web numeric transport. |
-| Wasmline | `evilo-core/src/commonMain/kotlin/crow/evilo/app/PluginSessionFactory.kt`, `plugin/runtime/WasmlinePluginLoader.kt`, SDK service interfaces | Load signed remote manifests using app-supplied keys. Keep guest services synchronous and portable; catalogs do not provide trusted keys. |
+| Wasmline | `evilo-core/src/commonMain/kotlin/crow/evilo/app/PluginSessionFactory.kt`, `plugin/runtime/WasmlinePluginLoader.kt`, `plugin/catalog/PluginPublisher.kt`, SDK service interfaces | Require signed remote manifests. Use the build-supplied official public key for legacy releases or a reviewed release's declared publisher key and pinned manifest digest. Catalog declarations never grant global trust; guest services remain synchronous and portable. |
 
 The shared dependency direction is `evilo-app -> evilo-core -> evilo-library`.
 Core returns models and image bytes, never Compose types. Provider code and
@@ -28,8 +28,15 @@ release artifacts belong in independent repositories, not app dependencies.
 ## Startup and dependencies
 
 `App()` calls `rememberAppStorageFactory()` and `AppEnvironment.create()`.
-The environment opens storage, creates the host descriptor/generated public-key
-lookup, and registers `eviloCoreModule()` plus `eviloUiModule()`. It then calls
+The environment opens storage, creates the host descriptor and official-key
+lookup from `GeneratedEviloConfiguration`, and registers `eviloCoreModule()` plus
+`eviloUiModule()`. `GenerateEviloAppConfiguration` embeds the official public key supplied through
+`EVILO_PUBLIC_KEY_HEX` (which takes precedence) or an existing external `public.key`
+in `~/.evilo/signing`, with its directory overridable through
+`-Pevilo.signingKeyDirectory=/absolute/external/directory`. Missing or invalid
+public material fails the build. Compilation never reads private keys, depends
+on `generatePluginSigningKeys`, or creates an authority.
+It then calls
 `PluginCatalogRepository.initialize(BundledPluginCatalogJson)`. Non-preview
 startup dispatches `PluginHomeIntent.Refresh`; previews explicitly use memory
 stores. `KoinIsolatedContext` exposes the environment to Compose.
@@ -52,15 +59,24 @@ form text and local version selection may stay in Compose state.
   selectors and permission/removal/uninstall confirmations are overlays. Refresh
   has an independent operation scope and does not block local search/navigation.
 - `PluginHomeIntent.ApproveInstall` reaches `AppPluginController.install()` via
-  `PluginHomeStore.dispatch()`. The controller checks the release, acquires it
-  through `PluginSessionFactory.connect()` and `WasmlinePluginLoader.loadRemote()`,
-  then records the verified descriptor with `PluginCatalogRepository.recordInstallation()`.
+  `PluginHomeStore.dispatch()`. `PermissionReview` retains the exact release;
+  approval rechecks it against current metadata. Third-party review explicitly
+  accepts the exact version, public-key fingerprint, and permissions before execution.
+  `PluginSessionFactory.connect()` selects the release-scoped verification key
+  with `releaseVerificationKeys()`; `WasmlinePluginLoader.loadRemote()` checks the
+  pinned manifest digest and descriptor, then Wasmline verifies the signature.
+  `PluginCatalogRepository.recordInstallation()` requires and records the verified
+  descriptor/digest alongside the approved release identity and permissions.
   Install-only closes the verification session and keeps the initiating page;
-  install-and-browse reuses that session. Each open still fetches/verifies the signed
-  manifest with a zero TTL; the default Wasmline artifact cache reuses hash-checked
-  modules. Debug builds retain observable phase timings in `PluginConnectionState`,
-  while release UI shows generic progress. Keep acceptance checks before publishing
-  active sessions.
+  install-and-browse reuses that session. Installed opens use `connectInstalled()`
+  with the recorded signing declaration and digest; catalog edits cannot substitute
+  another key or signed manifest. A same-key re-sign of changed bytes is rejected.
+  Legacy records lacking a digest require explicit review/reinstall; an unchanged
+  release preserves its original timestamp. Every new third-party version needs
+  explicit approval. Each open fetches/verifies the signed manifest with a zero
+  TTL; the default Wasmline artifact cache reuses hash-checked modules. Debug builds
+  retain observable phase timings in `PluginConnectionState`, while release UI
+  shows generic progress. Keep acceptance checks before publishing active sessions.
 - Installed Browse rows call `AppPluginController.open()`; their independent Info
   action opens full details without connecting a session. Source catalogs own
   All/Installed filters and first-install review. `BrowseProjection.kt` merges
@@ -99,10 +115,19 @@ summary dates/version without using the clock. Explicit overrides are whole-fiel
 replacements, not merges; stored metadata remains full and release-specific.
 
 Keep catalog status separate from trusted keys and user consent. There is no
-review/certification field or filter, and independent sources cannot add signing
-keys. All mandatory version floors, including the built-in source's floors, apply
-only to their own subscription. Preserve existing Room records when changing
-source IDs/URLs and preserve recorded permissions when catalog defaults change.
+review/certification field or filter. Third-party releases declare `signing` and
+`manifestSha256`; `CatalogParser` requires a valid exact-manifest digest whenever
+signing is present, including inherited signing. Omission of signing supports only
+legacy official signatures. Declarations do not extend global trust: the user
+approves a release's fingerprint (SHA-256 of raw public-key bytes), version, and
+permissions. Compare fingerprints through an independent publisher channel;
+initial acceptance alone does not authenticate a real-world identity.
+`PluginCatalogRepository.releaseBlock()` rejects the same installed ID from a
+different publisher, including disabled-source copies; all existing copies must
+be uninstalled before changing publisher. All mandatory version floors, including
+the built-in source's floors, apply only to their own subscription. Preserve existing
+Room records when changing source IDs/URLs and preserve recorded permissions when
+catalog defaults change.
 
 ## HTTP, images, and persistence
 
@@ -126,9 +151,15 @@ Video playback is external and cannot forward plugin headers; in-app video,
 library/history/downloads, saved progress, and synchronization are not implemented.
 
 DataStore owns `evilo.preferences.pb`; Room3 owns `evilo.catalogs.db`.
-`PluginStorageSession.transaction()` stages guest KV per signed plugin ID and
+`PluginSessionFactory` passes `publisherStorageKey()` to
+`EviloPreferencesRepository.pluginSession(pluginId, storageKey)`:
+legacy official storage keeps the plugin ID as its persistent key; third-party
+storage uses `publisher:<public-key fingerprint>:<plugin ID>`. Guest callbacks
+still access only `plugin.<plugin ID>`, not the host-selected persistent key.
+`PluginStorageSession.transaction()` stages KV under a per-storage-key mutex and
 commits successful changes with `DataStore.updateData()`. Versions/subscriptions
-of one signed ID share KV. Room commits finish before repository state publishes.
+of one publisher/ID share KV; changing publisher cannot expose retained values.
+Room commits finish before repository state publishes.
 Room and DataStore do not share a transaction: last-installation uninstall records
 pending KV deletion in Room, then erases DataStore; startup/refresh/install retries
 unfinished deletion. Source removal retains KV.

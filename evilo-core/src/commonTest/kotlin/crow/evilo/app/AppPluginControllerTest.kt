@@ -27,6 +27,48 @@ import kotlin.test.assertTrue
 
 class AppPluginControllerTest {
     @Test
+    fun installedOpenRejectsADifferentVerifiedManifestAndClosesTheSession() = runTest {
+        val fixture = RepositoryFixture(pluginCatalog())
+        fixture.initialize()
+        val listing = fixture.repository.state.value.listings.single()
+        val release = listing.plugin.latestRelease
+        fixture.repository.recordInstallation(listing, release, listing.plugin.descriptor(release), "d".repeat(64))
+        val installed = fixture.repository.state.value.installed.single()
+        val session = TestPluginSession(listing.plugin.descriptor(release), verifiedManifestSha256 = "e".repeat(64))
+        val controller = AppPluginController(fixture.repository, PluginSessionConnector { _, _, _, _ -> session }, this)
+        try {
+            controller.open(installed)
+            controller.awaitIdle()
+            assertNull(controller.state.value.active)
+            assertTrue(controller.state.value.error.orEmpty().contains("installed approval"))
+            assertEquals(1, session.closeCalls)
+            assertEquals(installed, fixture.repository.state.value.installed.single())
+        } finally { controller.close(); fixture.transport.close() }
+    }
+
+    @Test
+    fun thirdPartyInstallWithoutPublisherApprovalNeverConnects() = runTest {
+        val original = catalogPlugin()
+        val release = original.latestRelease.copy(
+            signing = crow.evilo.plugin.catalog.PluginSigningIdentity("publisher-test", "02".repeat(32)),
+            manifestSha256 = "d".repeat(64))
+        val fixture = RepositoryFixture(pluginCatalog().copy(plugins = listOf(original.copy(availableVersions = listOf(release)))))
+        fixture.initialize()
+        var connections = 0
+        val controller = AppPluginController(fixture.repository, PluginSessionConnector { plugin, selected, _, _ ->
+            connections++
+            TestPluginSession(plugin.descriptor(selected))
+        }, this)
+        try {
+            controller.install(fixture.repository.state.value.listings.single(), release)
+            controller.awaitIdle()
+            assertEquals(0, connections)
+            assertTrue(fixture.repository.state.value.installed.isEmpty())
+            assertTrue(controller.state.value.error.orEmpty().contains("publisher approval"))
+        } finally { controller.close(); fixture.transport.close() }
+    }
+
+    @Test
     fun installOnlyRecordsThePluginReportsRealPhasesAndClosesTheVerificationSession() = runTest {
         val fixture = RepositoryFixture(pluginCatalog())
         fixture.initialize()
@@ -159,7 +201,7 @@ class AppPluginControllerTest {
         fixture.initialize()
         val listing = fixture.repository.state.value.listings.single()
         val release = listing.plugin.latestRelease
-        fixture.repository.recordInstallation(listing, release, listing.plugin.descriptor(release))
+        fixture.repository.recordInstallation(listing, release, listing.plugin.descriptor(release), "d".repeat(64))
         val installation = fixture.repository.state.value.installed.single()
         val sessions = mutableListOf<TestPluginSession>()
         val controller = AppPluginController(fixture.repository, PluginSessionConnector { plugin, selected, _, _ ->
@@ -194,7 +236,7 @@ class AppPluginControllerTest {
         fixture.initialize()
         val listing = fixture.repository.state.value.listings.single()
         val release = listing.plugin.latestRelease
-        fixture.repository.recordInstallation(listing, release, listing.plugin.descriptor(release))
+        fixture.repository.recordInstallation(listing, release, listing.plugin.descriptor(release), "d".repeat(64))
         val installation = fixture.repository.state.value.installed.single()
         var connections = 0
         val controller = AppPluginController(fixture.repository, PluginSessionConnector { plugin, selected, _, _ ->
@@ -220,7 +262,7 @@ class AppPluginControllerTest {
         val next = catalogPlugin().copy(id = "next.plugin")
         val fixture = RepositoryFixture(pluginCatalog(listOf(old, next)))
         fixture.initialize()
-        fixture.repository.state.value.listings.forEach { fixture.repository.recordInstallation(it, it.plugin.latestRelease, it.plugin.descriptor(it.plugin.latestRelease)) }
+        fixture.repository.state.value.listings.forEach { fixture.repository.recordInstallation(it, it.plugin.latestRelease, it.plugin.descriptor(it.plugin.latestRelease), "d".repeat(64)) }
         val oldSession = TestPluginSession(old.descriptor(old.latestRelease))
         val gate = CompletableDeferred<Unit>()
         val controller = AppPluginController(fixture.repository, PluginSessionConnector { plugin, _, _, phase ->

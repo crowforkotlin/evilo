@@ -36,6 +36,33 @@ import kotlin.test.assertTrue
 
 class PluginHomeStoreTest {
     @Test
+    fun thirdPartyReleaseRequiresExplicitPublisherApprovalBeforeConnecting() = runTest {
+        val original = catalogPlugin()
+        val release = original.latestRelease.copy(
+            signing = crow.evilo.plugin.catalog.PluginSigningIdentity("publisher-test", "02".repeat(32)),
+            manifestSha256 = "d".repeat(64))
+        val plugin = original.copy(availableVersions = listOf(release))
+        val fixture = HomeFixture(this, pluginCatalog().copy(plugins = listOf(plugin)))
+        try {
+            fixture.initialize()
+            val listing = fixture.repository.state.value.listings.single()
+            fixture.openSourceDetail(listing.key)
+            fixture.store.dispatch(PluginHomeIntent.ReviewRelease(listing.key, release.versionCode))
+            val review = assertIs<HomeOverlay.PermissionReview>(fixture.store.state.value.overlay)
+            fixture.store.dispatch(PluginHomeIntent.ApproveInstall(review))
+            fixture.awaitIdle()
+            assertTrue(fixture.sessions.isEmpty())
+            assertTrue(fixture.repository.state.value.installed.isEmpty())
+            assertEquals(review, fixture.store.state.value.overlay)
+            assertTrue(fixture.store.state.value.actionError.orEmpty().contains("publisher approval"))
+            fixture.store.dispatch(PluginHomeIntent.ApproveInstall(review, publisherApproved = true))
+            fixture.awaitIdle()
+            assertEquals(1, fixture.sessions.size)
+            assertEquals("d".repeat(64), fixture.repository.state.value.installed.single().approvedManifestSha256)
+        } finally { fixture.close() }
+    }
+
+    @Test
     fun transientDismissalKeepsThePluginBrowsersPersistentConnectionFailure() = runTest {
         val fixture = HomeFixture(this)
         try {
@@ -410,7 +437,7 @@ class PluginHomeStoreTest {
 
         suspend fun initialize() { catalogs.initialize(); sync() }
         suspend fun installAll() {
-            repository.state.value.listings.forEach { repository.recordInstallation(it, it.plugin.latestRelease, it.plugin.descriptor(it.plugin.latestRelease)) }
+            repository.state.value.listings.forEach { repository.recordInstallation(it, it.plugin.latestRelease, it.plugin.descriptor(it.plugin.latestRelease), "d".repeat(64)) }
             sync()
         }
         fun openSourceDetail(key: String) {

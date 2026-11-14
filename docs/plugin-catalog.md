@@ -22,10 +22,22 @@ copy its release metadata into `availableVersions` and keep common fields once
 per plugin. Use the template README for export inputs and commands; hashes and
 source revisions must come from the actual export, not invented values.
 
-Independent catalog hosting does **not** mean independent package signing. The
-current app only accepts packages signed by its embedded application authority.
-A custom source cannot add trusted keys or accept another publisher's signature.
-This restriction is separate from catalog format and permission consent.
+Every installable package must be signed. Official packages use the App's embedded
+verification key; third-party publishers keep their own private key and publish
+`signing` and `manifestSha256` on each release. A catalog declaration is not trust:
+users explicitly approve the publisher fingerprint, exact version, and permissions
+before execution. No PR adding a publisher key to evilo is required. Catalog
+inclusion, including in the bundled source, is not a safety review.
+
+```json
+"signing": {"algorithm": "Ed25519", "keyId": "publisher-example", "publicKeyHex": "<64 lowercase hexadecimal characters>"},
+"manifestSha256": "<SHA-256 of the exact signed manifest.wlm bytes>"
+```
+
+The placeholders are illustrative, not valid release metadata. Export uses the
+actual publisher public key and signed manifest bytes. Compare fingerprints through
+an independent publisher channel; initial confirmation alone cannot authenticate
+a real-world identity. Unsigned packages and invalid signatures remain rejected.
 
 There is no separate JSON Schema file to maintain and no `$schema` property to
 add. `CatalogParser` normalizes compact input and then validates the existing
@@ -94,6 +106,14 @@ overrides for older releases or override the new release instead. Approved
 installations keep their recorded permissions; changed normalized release metadata
 blocks opening and requires review, and signed descriptor checks still apply.
 
+Each third-party version requires a new explicit approval. A changed signing key
+is a publisher change, not a transparent update. Installed loads use their recorded
+verification identity and signed-manifest digest; changing the remote bytes is
+rejected even when the same publisher signs them. Publishers must issue a new
+version/code for changed code. Legacy installations without a pinned digest require
+one explicit reinstall; original timestamps are retained for the unchanged release.
+No global third-party key whitelist or unsigned loading path is introduced.
+
 Removing a release or marking it `usable: false` withdraws it after refresh;
 existing installations of that release can no longer open from that source.
 
@@ -159,6 +179,8 @@ installed copy and does not silently replace its data or permissions.
 | `maximumHostVersionCode` | Optional inclusive upper bound; null means no upper bound. |
 | `protocol` | Inherits plugin requirements; otherwise SDK defaults. Explicit objects replace the common object and use SDK defaults for omitted members. |
 | `permissions` | Inherits plugin permissions; otherwise no network origins or storage. Explicit objects replace the common object. |
+| `signing` | Optional publisher Ed25519 `keyId` and 32-byte lowercase `publicKeyHex`; may inherit from the plugin. Omission only supports legacy official-signed releases. Never automatically trusted. |
+| `manifestSha256` | Exact signed manifest SHA-256; required with `signing`. Installation records pin the verified digest, including for legacy official releases. |
 
 Release identity, kinds, languages, protocol requirements, and permissions must
 match `evilo.descriptor` in the signed manifest and the guest's runtime descriptor.
@@ -212,8 +234,10 @@ release kinds, not capabilities introduced by a newer catalog release. Withdrawn
 changed, or mandatory-update installations keep a management entry with their
 blocking reason; disabling a source hides its installations without deleting them.
 
-Duplicate display merging defaults on and uses verified installed `plugin.id`
-within the app's one signing authority. A matching name, icon, or catalog-only ID
+Duplicate display merging defaults on and uses verified installed `plugin.id`.
+Different publishers cannot coexist under one installed ID: uninstall its copies
+before changing publisher. Third-party storage is additionally namespaced by
+public-key fingerprint, so changing publishers cannot expose the previous data. A matching name, icon, or catalog-only ID
 does not create a verified installation. Original `sourceId:pluginId` records,
 permissions, version floors, timestamps, and per-source actions remain separate.
 The default source is a saved installation key or the oldest installation with

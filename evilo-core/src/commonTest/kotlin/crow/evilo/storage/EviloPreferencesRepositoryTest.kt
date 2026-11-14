@@ -57,6 +57,89 @@ class EviloPreferencesRepositoryTest {
     }
 
     @Test
+    fun scopedPluginSessionsKeepPublisherAndLegacyValuesSeparateAcrossProtobufReopen() = runTest {
+        val dataStore = MemoryDataStore(EviloPreferences())
+        val repository = EviloPreferencesRepository(dataStore)
+        val firstKey = "publisher:${"a".repeat(64)}:one"
+        val secondKey = "publisher:${"b".repeat(64)}:one"
+        val legacy = repository.pluginSession("one")
+        val first = repository.pluginSession("one", firstKey)
+        val second = repository.pluginSession("one", secondKey)
+        legacy.transaction { legacy.write("plugin.one", "setting", "official") }
+        first.transaction {
+            assertNull(first.read("plugin.one", "setting"))
+            assertFailsWith<IllegalArgumentException> { first.read("plugin.$firstKey", "setting") }
+            assertFailsWith<IllegalArgumentException> { first.read("plugin.two", "setting") }
+            first.write("plugin.one", "setting", "first")
+        }
+        second.transaction {
+            assertNull(second.read("plugin.one", "setting"))
+            second.write("plugin.one", "setting", "second")
+        }
+        val persisted = EviloPreferencesCodec.decode(EviloPreferencesCodec.encode(dataStore.data.first()))
+        assertEquals(setOf("one", firstKey, secondKey), persisted.pluginValues.keys)
+        val reopened = EviloPreferencesRepository(MemoryDataStore(persisted))
+        for ((key, value) in mapOf("one" to "official", firstKey to "first", secondKey to "second")) {
+            val restored = reopened.pluginSession("one", key)
+            restored.transaction { assertEquals(value, restored.read("plugin.one", "setting")) }
+        }
+    }
+
+    @Test
+    fun erasingAScopedStorageKeyDoesNotEraseAnotherPublisherOrLegacyValues() = runTest {
+        val firstKey = "publisher:${"a".repeat(64)}:one"
+        val secondKey = "publisher:${"b".repeat(64)}:one"
+        val original = PluginValues(4, mapOf("setting" to "retained"))
+        val dataStore = MemoryDataStore(EviloPreferences(pluginValues =
+            mapOf("one" to original, firstKey to original, secondKey to original)))
+        val repository = EviloPreferencesRepository(dataStore)
+        repository.erasePluginData(firstKey)
+        assertEquals(mapOf("one" to original, firstKey to PluginValues(5), secondKey to original),
+            dataStore.data.first().pluginValues)
+        val erased = repository.pluginSession("one", firstKey)
+        erased.transaction { assertNull(erased.read("plugin.one", "setting")) }
+    }
+
+    @Test
+    fun scopedSessionsSerializeOnlyTheSamePublisherStorageKey() = runTest {
+        val repository = EviloPreferencesRepository(MemoryDataStore(EviloPreferences()))
+        val firstKey = "publisher:${"a".repeat(64)}:one"
+        val secondKey = "publisher:${"b".repeat(64)}:one"
+        val first = repository.pluginSession("one", firstKey)
+        val samePublisher = repository.pluginSession("one", firstKey)
+        val otherPublisher = repository.pluginSession("one", secondKey)
+        val completed = CompletableDeferred<Unit>()
+        var samePublisherStarted = false
+        var otherPublisherStarted = false
+        val operation = launch {
+            first.transaction { first.write("plugin.one", "setting", "first"); completed.await() }
+        }
+        runCurrent()
+        val waiting = launch {
+            samePublisher.transaction {
+                samePublisherStarted = true
+                assertEquals("first", samePublisher.read("plugin.one", "setting"))
+            }
+        }
+        val independent = launch {
+            otherPublisher.transaction {
+                otherPublisherStarted = true
+                assertNull(otherPublisher.read("plugin.one", "setting"))
+                otherPublisher.write("plugin.one", "setting", "second")
+            }
+        }
+        runCurrent()
+        assertFalse(samePublisherStarted)
+        assertTrue(otherPublisherStarted)
+        completed.complete(Unit)
+        operation.join()
+        waiting.join()
+        independent.join()
+        assertTrue(samePublisherStarted)
+        otherPublisher.transaction { assertEquals("second", otherPublisher.read("plugin.one", "setting")) }
+    }
+
+    @Test
     fun failedOperationsAndFailedWritesDiscardStagedValues() = runTest {
         val dataStore = ControlledDataStore()
         val repository = EviloPreferencesRepository(dataStore)

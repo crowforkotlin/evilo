@@ -82,8 +82,8 @@ Android private files, JVM app data, iOS Application Support, or browser OPFS.
 Browsers use `WebOpfsStorage` and a `WebWorkerSQLiteDriver` with a bundled module
 worker/SQLite runtime; one tab per origin owns the SAH pool via a Web Lock. No
 old JSON/localStorage migration or memory fallback belongs in production startup.
-Plugin callbacks stage synchronous KV changes under per-ID operation mutexes;
-DataStore commits after a successful host operation. StoreLock protects staged
+Plugin callbacks stage synchronous KV changes under per-publisher/ID storage-key
+mutexes; DataStore commits after a successful host operation. StoreLock protects staged
 memory, not disk persistence. Native multi-process/device synchronization is not
 provided. See `docs/application-architecture.md` for API and worker setup details.
 
@@ -94,7 +94,8 @@ provided. See `docs/application-architecture.md` for API and worker setup detail
 - Execution settings: `gradle.properties`, wrapper, and daemon files.
 - Protocol major/minor/capabilities: `evilo-library`, not app release properties.
 - Catalog normalization/parser/default URL: `evilo-core`; bundled `plugin.json`: `plugin-repository`.
-- Authority: `:evilo-app:generatePluginSigningKeys` and external `evilo.signingKeyDirectory`.
+- Official public key: build-supplied `EVILO_PUBLIC_KEY_HEX` or existing external `public.key` under `evilo.signingKeyDirectory`; compilation never creates keys.
+- Publisher signing: reviewed per-release `signing` and exact `manifestSha256`, not an app-wide trust list.
 - Runtime permissions: reviewed per-release origins/methods/headers/storage and HTTP consent.
 
 The SDK publication is `io.github.crowforkotlin.evilo:evilo-library`, versioned once in the catalog.
@@ -108,8 +109,9 @@ services are bound/linked. Public contracts use `api`; hidden dependencies use
 font/theme resources live in `evilo-app`, not duplicate platform resource trees.
 All UI resources use `crow.evilo.app.resources`. Both app configuration and the
 bundled catalog generation tasks are registered in `evilo-app`.
-The app injects its generated public authority into `PluginSessionFactory` in
-`evilo-core`; neither catalogs nor plugins can supply app trust keys.
+The app injects its build-supplied official public key into `PluginSessionFactory`
+in `evilo-core`. Catalog signing declarations apply only to the reviewed release
+and never replace the official key or extend a global trust list.
 
 Xcode's repository root is `$SRCROOT/..`; its configuration includes
 `../../project.properties`. Framework build phase, Gradle task, Swift import,
@@ -126,10 +128,15 @@ parameters without checking read-only upstream support. Preserve plugin-qualifie
 IDs and explicit continuations. Legacy manga API 2 is an adapter, not the generic
 app's installable protocol. Optional fields do not change bridge signatures.
 
-Keep one Ed25519 authority across an app release family and its updates. The app
-embeds public material only; templates cannot generate replacement keys. Private
-keys stay outside repos, resources, source ZIPs, and catalogs. Users/catalogs cannot
-supply trust keys. Signing does not prove network or execution safety.
+Preserve the official Ed25519 verification key across app releases. App compilation
+requires existing public material and never creates keys or reads private material;
+`generatePluginSigningKeys` is a separately invoked official-operator task.
+Third-party publishers keep their own private keys and declare per-release signing
+and manifest digests. Users approve the exact version, fingerprint, and permissions;
+unsigned packages remain rejected. Private keys stay outside repos, resources,
+source ZIPs, and catalogs. Same-ID/different-publisher installations are blocked;
+third-party KV is isolated by fingerprint and plugin ID. Signing does not prove
+network or execution safety.
 
 Use signed remote manifests and explicit package/network policies. Do not accept
 raw modules through UI, copy sample trust keys, grant wildcard origins, or claim

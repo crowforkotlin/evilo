@@ -211,8 +211,10 @@ Wasmline services stay synchronous. Do not add `suspend`, overloads, generics, o
 new bridge signatures to make DataStore calls from a guest. The existing host
 service methods operate on staged memory:
 
-1. `PluginStorageSession.transaction()` acquires the shared mutex for the signed
-   plugin ID and reads its durable namespace from DataStore.
+1. `PluginStorageSession.transaction()` acquires the shared mutex for the
+   host-selected publisher/plugin storage key and reads its durable values from
+   DataStore. `PluginSessionFactory` supplies that key through
+   `EviloPreferencesRepository.pluginSession(pluginId, storageKey)`.
 2. The guest's `readValue`, `writeValue`, `removeValue`, and `listKeys` access only
    that staged namespace while the operation is active. The host applies consent
    and per-plugin key/value/count/total limits.
@@ -224,9 +226,12 @@ service methods operate on staged memory:
    cancellation cannot undo a completed durable write. Write failures propagate.
 
 `writeValue(true)` acknowledges staged acceptance, not immediate disk durability.
-Different versions/subscriptions of one signed plugin ID share its namespace;
-plugins cannot choose a different namespace. Erasing values keeps an empty
-namespace with an incremented revision, so stale operations cannot reuse an old
+Different versions/subscriptions of one verified publisher/plugin ID share data.
+Official releases retain the legacy ID-only persistent key; third-party storage
+uses `publisher:<public-key fingerprint>:<plugin ID>`. Guests still access only
+`plugin.<plugin ID>` and cannot select the persistent key or read another
+publisher's retained values. Erasing values keeps an empty persistent namespace
+with an incremented revision, so stale operations cannot reuse an old
 revision. Runtime disposal waits for operations but never reads DataStore or
 permits guest KV callbacks. The protocol comments live in
 `evilo-library/src/commonMain/kotlin/crow/evilo/plugin/api/PluginProtocol.kt`.

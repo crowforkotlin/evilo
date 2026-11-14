@@ -11,7 +11,8 @@ import crow.evilo.plugin.catalog.PluginBlock
 enum class HomeDestination { BROWSE, MORE }
 enum class CatalogFilter { ALL, INSTALLED }
 
-data class PluginReleaseChoice(val release: PluginRelease, val blocked: String?, val block: PluginBlock? = null)
+data class PluginReleaseChoice(val release: PluginRelease, val blocked: String?, val block: PluginBlock? = null,
+    val officialSigner: Boolean = release.signing == null)
 
 data class PluginEntry(
     val key: String,
@@ -111,7 +112,7 @@ sealed interface PluginHomeIntent {
     data class SelectPreferredInstallation(val key: String) : PluginHomeIntent
     data class ManagePlugin(val key: String, val rememberSourceOnOpen: Boolean = true) : PluginHomeIntent
     data class ReviewRelease(val key: String, val versionCode: Long, val openAfterInstall: Boolean = false) : PluginHomeIntent
-    data class ApproveInstall(val review: HomeOverlay.PermissionReview) : PluginHomeIntent
+    data class ApproveInstall(val review: HomeOverlay.PermissionReview, val publisherApproved: Boolean = false) : PluginHomeIntent
     data class RequestUninstall(val key: String) : PluginHomeIntent
     data class ConfirmUninstall(val key: String) : PluginHomeIntent
     data object DismissOverlay : PluginHomeIntent

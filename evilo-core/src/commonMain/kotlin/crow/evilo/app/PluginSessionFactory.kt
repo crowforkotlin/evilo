@@ -3,6 +3,8 @@ package crow.evilo.app
 import crow.evilo.model.MediaStream
 import crow.evilo.plugin.catalog.CatalogPlugin
 import crow.evilo.plugin.catalog.PluginRelease
+import crow.evilo.plugin.catalog.publisherStorageKey
+import crow.evilo.plugin.catalog.releaseVerificationKeys
 import crow.evilo.plugin.api.HostDescriptor
 import crow.evilo.plugin.api.MediaSource
 import crow.evilo.plugin.api.PluginDescriptor
@@ -40,13 +42,26 @@ class PluginSessionFactory(
 ) : PluginSessionConnector {
     override suspend fun connect(plugin: CatalogPlugin, release: PluginRelease, allowHttp: Boolean,
         onPhase: (PluginLoadPhase) -> Unit): MediaSourceSession {
+        return connectVerified(plugin, release, allowHttp, release.manifestSha256, onPhase)
+    }
+
+    override suspend fun connectInstalled(plugin: CatalogPlugin, release: PluginRelease, allowHttp: Boolean,
+        approvedManifestSha256: String?, onPhase: (PluginLoadPhase) -> Unit): MediaSourceSession {
+        require(approvedManifestSha256 != null) { "Review and reinstall this legacy installation to pin its signed manifest." }
+        return connectVerified(plugin, release, allowHttp, approvedManifestSha256, onPhase)
+    }
+
+    private suspend fun connectVerified(plugin: CatalogPlugin, release: PluginRelease, allowHttp: Boolean,
+        expectedManifestSha256: String?, onPhase: (PluginLoadPhase) -> Unit): MediaSourceSession {
         val callerContext = currentCoroutineContext()
         suspend fun report(phase: PluginLoadPhase) = withContext(callerContext) { onPhase(phase) }
         val expected = PluginDescriptor(plugin.id, plugin.name, release.version, release.versionCode, release.kinds,
             release.languages, release.protocol, release.permissions)
         val packagePolicy = PackageNetworkPolicy(release.manifestUrl, allowHttp)
         val policy = PluginNetworkPolicy(plugin.id, release.permissions, allowHttp)
-        val store = preferences.pluginSession(plugin.id)
+        val store = preferences.pluginSession(plugin.id, publisherStorageKey(plugin.id, release, trustedKeys))
+        val verificationKeys = releaseVerificationKeys(release, trustedKeys)
+        var manifestDigest: String? = null
         val http = PluginHttpClient(transport, policy)
         var loaded: MediaSource? = null
         try {
@@ -54,7 +69,7 @@ class PluginSessionFactory(
             withContext(Dispatchers.Default) {
                 store.transaction { loaded = WasmlinePluginLoader(host, store, http).loadRemote(
                     packagePolicy.manifestUrl,
-                    WasmlineLoadOptions(runtimeConfig = WasmlineConfig(supportConcurrent = true), trustedKeys = trustedKeys,
+                    WasmlineLoadOptions(runtimeConfig = WasmlineConfig(supportConcurrent = true), trustedKeys = verificationKeys,
                         networkClient = PackageProgressClient(packagePolicy.manifestUrl,
                             PolicyPackageNetworkClient(transport, packagePolicy), ::report),
                         // A zero manifest TTL still fetches/verifies the signed manifest on every open.
@@ -62,10 +77,12 @@ class PluginSessionFactory(
                         manifestTtlMs = 0, maxCacheBytes = 128L * 1024 * 1024, maxArtifactBytes = 64L * 1024 * 1024),
                     expected, release.sourceRevision, release.sourceArchiveSha256,
                     onNegotiating = { report(PluginLoadPhase.NEGOTIATING) },
+                    expectedManifestSha256 = expectedManifestSha256,
+                    onManifestChecked = { manifestDigest = it },
                 ) }
             }
             currentCoroutineContext().ensureActive()
-            return PluginMediaSession(BackgroundMediaSource(checkNotNull(loaded), store), http)
+            return PluginMediaSession(BackgroundMediaSource(checkNotNull(loaded), store), http, checkNotNull(manifestDigest))
         } catch (failure: Throwable) {
             try {
                 withContext(NonCancellable + Dispatchers.Default) { loaded?.close() }
@@ -103,6 +120,7 @@ private class PackageProgressClient(
 private class PluginMediaSession(
     override val source: MediaSource,
     private val http: PluginHttpClient,
+    override val verifiedManifestSha256: String,
 ) : MediaSourceSession {
     private val mutex = Mutex()
     private val stateLock = StoreLock()
