@@ -71,9 +71,15 @@ A document must declare exactly one of the three; declaring two or none is rejec
 }
 ```
 
-Each entry is fetched separately. Twenty repositories cost twenty requests, so
-this shape suits a short, stable list. Entries must be unique, absolute HTTP(S)
-URLs, and one collection cannot list another collection.
+Subscribing to this address expands it: the app adds one source per listed
+repository and fetches each document once. Twenty repositories therefore cost
+twenty requests, so this shape suits a short, stable list; an index suits a large
+catalogue. Entries must be unique absolute HTTP(S) URLs. An entry that is itself a
+collection is not expanded again and is reported as a failing source.
+
+Removing one of the added sources leaves the others in place; the collection
+address is not stored after it is expanded, so adding it again only subscribes
+repositories that are missing.
 
 ### Subscription pointer
 

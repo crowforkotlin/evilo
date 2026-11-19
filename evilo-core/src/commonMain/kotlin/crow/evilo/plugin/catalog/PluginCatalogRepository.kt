@@ -6,6 +6,7 @@ import crow.evilo.plugin.api.PluginDescriptor
 import crow.evilo.plugin.api.PluginJson
 import crow.evilo.plugin.subscription.SubscriptionContent
 import crow.evilo.plugin.subscription.SubscriptionIndex
+import crow.evilo.plugin.subscription.SubscriptionCollection
 import crow.evilo.plugin.subscription.SubscriptionParser
 import crow.evilo.plugin.subscription.SubscriptionPointer
 import crow.evilo.plugin.subscription.indexAsCatalog
@@ -31,6 +32,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import okio.ByteString.Companion.encodeUtf8
 import kotlin.time.Clock
 
 data class PluginRepositoryState(
@@ -174,28 +176,33 @@ class PluginCatalogRepository(
             selected
         }
         try {
-            cleanupPluginData(records.read().pendingDataDeletes)
-            sources.chunked(REFRESH_CONCURRENCY).forEach { batch ->
-                operations.withLock {
-                    mutableState.update { current ->
-                        current.copy(sourceChecks = current.sourceChecks + batch.associate { subscription ->
-                            subscription.id to (current.sourceChecks[subscription.id] ?: SourceCheckState()).copy(running = true, error = null)
-                        })
-                    }
-                }
-                val results = coroutineScope {
-                    batch.map { subscription -> async { subscription to fetchOutcome(subscription) } }.awaitAll()
-                }
-                operations.withLock {
-                    val cancelled = currentCoroutineContext().let { context ->
-                        runCatching { context.ensureActive() }.isFailure
-                    }
-                    if (cancelled) return@withLock
-                    for ((subscription, outcome) in results) applyRefresh(subscription, outcome)
-                }
-            }
+            fetchInBatches(sources)
         } finally {
             operations.withLock { mutableState.update { it.copy(refreshing = false) } }
+        }
+    }
+
+    /** Fetches each source in bounded batches, publishing successes and recording failures. */
+    private suspend fun fetchInBatches(sources: List<CatalogSubscription>) {
+        cleanupPluginData(records.read().pendingDataDeletes)
+        sources.chunked(REFRESH_CONCURRENCY).forEach { batch ->
+            operations.withLock {
+                mutableState.update { current ->
+                    current.copy(sourceChecks = current.sourceChecks + batch.associate { subscription ->
+                        subscription.id to (current.sourceChecks[subscription.id] ?: SourceCheckState()).copy(running = true, error = null)
+                    })
+                }
+            }
+            val results = coroutineScope {
+                batch.map { subscription -> async { subscription to fetchOutcome(subscription) } }.awaitAll()
+            }
+            operations.withLock {
+                val cancelled = currentCoroutineContext().let { context ->
+                    runCatching { context.ensureActive() }.isFailure
+                }
+                if (cancelled) return@withLock
+                for ((subscription, outcome) in results) applyRefresh(subscription, outcome)
+            }
         }
     }
 
@@ -232,23 +239,82 @@ class PluginCatalogRepository(
         )
     }
 
-    suspend fun addSource(url: String, allowHttp: Boolean) = operations.withLock {
+    /**
+     * Adds one address. A plugin catalog and a signed pointer become one source; a
+     * collection expands into one source per repository it lists, because the collection
+     * document carries no plugin data of its own.
+     */
+    suspend fun addSource(url: String, allowHttp: Boolean) {
         val checked = PluginUrlPolicy.check(url.trim(), allowHttp).toString()
-        require(mutableState.value.subscriptions.none { it.url == checked }) { "This plugin source is already subscribed." }
-        var id = "custom.${Clock.System.now().toEpochMilliseconds()}"
-        while (mutableState.value.subscriptions.any { it.id == id }) id += "1"
-        val source = CatalogSubscription(id = id, url = checked, allowHttp = allowHttp)
-        val catalog = fetch(source)
-        currentCoroutineContext().ensureActive()
-        val subscriptions = mutableState.value.subscriptions + source
-        val snapshots = mutableState.value.snapshots + CatalogSnapshot(source, catalog)
-        val floors = nextUpdateFloors(snapshots)
-        persistAndPublish(CatalogWrite(subscriptions = subscriptions,
-            cachedCatalogs = mapOf(source.id to PluginJson.encodeToString(catalog)), updateFloors = floors)) {
-            updateFloors = floors
-            mutableState.update { it.copy(subscriptions = subscriptions, snapshots = snapshots, error = null,
-                sourceChecks = it.sourceChecks + (source.id to SourceCheckState(lastSuccessAt = Clock.System.now().toString()))) }
+        operations.withLock {
+            require(mutableState.value.subscriptions.none { it.url == checked }) { "This plugin source is already subscribed." }
         }
+        // Network work stays outside the mutex, as in refresh.
+        val text = download(checked, allowHttp)
+        val content = classifySafely(text, allowHttp)
+        val catalog = when (content) {
+            is SubscriptionContent.Collection -> null
+            is SubscriptionContent.Pointer -> fetchIndex(content.document, allowHttp)
+            else -> parseCatalog(text, allowHttp)
+        }
+        val added = operations.withLock {
+            if (content is SubscriptionContent.Collection) addCollection(content.document, allowHttp)
+            else addCatalogSource(checked, allowHttp, requireNotNull(catalog))
+        }
+        require(added.isNotEmpty()) { "This plugin source is already subscribed." }
+        if (content is SubscriptionContent.Collection) {
+            // Each listed repository is a separate source and needs its own document.
+            val sources = operations.withLock { mutableState.value.subscriptions.filter { it.id in added } }
+            fetchInBatches(sources)
+        }
+    }
+
+    private suspend fun addCatalogSource(url: String, allowHttp: Boolean, catalog: PluginCatalog): List<String> {
+        val id = newSourceId(url)
+        val source = CatalogSubscription(id = id, url = url, allowHttp = allowHttp)
+        publishSources(listOf(source), mapOf(source.id to catalog))
+        return listOf(id)
+    }
+
+    private suspend fun addCollection(collection: SubscriptionCollection, allowHttp: Boolean): List<String> {
+        val existing = mutableState.value.subscriptions.map { it.url }.toSet()
+        val fresh = collection.sources.map { it.trim() }.distinct().filterNot { it in existing }
+        require(fresh.isNotEmpty()) { "Every repository in this collection is already subscribed." }
+        val sources = fresh.map { url -> CatalogSubscription(newSourceId(url), url, allowHttp) }
+        publishSources(sources, emptyMap())
+        return sources.map { it.id }
+    }
+
+    /** Adds the sources, their catalogs, and their version floors in one write. */
+    private suspend fun publishSources(sources: List<CatalogSubscription>, catalogs: Map<String, PluginCatalog>) {
+        val subscriptions = mutableState.value.subscriptions + sources
+        val snapshots = mutableState.value.snapshots + sources.mapNotNull { source ->
+            catalogs[source.id]?.let { CatalogSnapshot(source, it) }
+        }
+        val floors = nextUpdateFloors(snapshots)
+        val now = Clock.System.now().toString()
+        persistAndPublish(CatalogWrite(subscriptions = subscriptions,
+            cachedCatalogs = catalogCache(catalogs), updateFloors = floors)) {
+            updateFloors = floors
+            mutableState.update { current ->
+                current.copy(subscriptions = subscriptions, snapshots = snapshots, error = null,
+                    sourceChecks = current.sourceChecks + sources.associate { source ->
+                        source.id to SourceCheckState(lastSuccessAt = if (source.id in catalogs) now else null)
+                    })
+            }
+        }
+    }
+
+    private fun catalogCache(catalogs: Map<String, PluginCatalog>): Map<String, String> =
+        catalogs.mapValues { PluginJson.encodeToString(it.value) }
+
+    /** A stable, separator-free identity: the installation key joins id and plugin id with ':'. */
+    private fun newSourceId(url: String): String {
+        val base = "custom." + url.encodeUtf8().sha256().hex().take(24)
+        var candidate = base
+        var suffix = 1
+        while (mutableState.value.subscriptions.any { it.id == candidate }) candidate = "$base-$suffix".also { suffix++ }
+        return candidate
     }
 
     suspend fun removeSource(sourceId: String) = operations.withLock {
