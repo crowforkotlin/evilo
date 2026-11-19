@@ -9,8 +9,6 @@ import crow.evilo.plugin.catalog.PluginCatalog
 import crow.evilo.plugin.api.PluginJson
 import crow.evilo.plugin.subscription.crypto.Ed25519
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.builtins.ListSerializer
-import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
@@ -20,10 +18,6 @@ import kotlinx.serialization.json.long
 import okio.ByteString.Companion.decodeHex
 import okio.ByteString.Companion.encodeUtf8
 import okio.ByteString.Companion.toByteString
-
-/** A hand-maintained list of plugin repository URLs. */
-@Serializable
-data class SubscriptionCollection(val name: String, val sources: List<String>)
 
 /** The pointer a collection publishes: where the index lives and who signed it. */
 @Serializable
@@ -56,13 +50,10 @@ data class IndexedPlugin(
 
 /** What an address actually served. */
 sealed interface SubscriptionContent {
-    /** A hand-maintained URL list. Expands to one source per entry. */
-    data class Collection(val document: SubscriptionCollection) : SubscriptionContent
-
     /** A pointer to a signed index. The bytes are fetched by the caller before verification. */
     data class Pointer(val document: SubscriptionPointer) : SubscriptionContent
 
-    /** A regular plugin catalog: this address is a plugin source, not a collection. */
+    /** A regular plugin catalog: this address is a plugin source. */
     data object PluginCatalog : SubscriptionContent
 }
 
@@ -78,42 +69,19 @@ internal fun indexAsCatalog(plugins: List<IndexedPlugin>, name: String, updatedA
     )
 
 object SubscriptionParser {
-    const val MAX_SOURCES = 4096
-    const val MAX_URL_LENGTH = 4096
-
     /**
-     * Distinguishes the three document shapes by field, so existing plugin catalogs keep
-     * working unchanged: `plugins` is a plugin source, `sources` is a collection,
-     * `indexUrl` is a pointer.
+     * A source address serves either a plugin catalog or a pointer to a signed index.
+     * Everything a subscriber needs beyond the pointer is inside the index, so no address
+     * requires a request per plugin.
      */
     fun classify(text: String, allowHttp: Boolean): SubscriptionContent {
         val json = PluginJson.parseToJsonElement(text).jsonObject
-        val shapes = listOf("plugins", "sources", "indexUrl").count { json.containsKey(it) }
+        val shapes = listOf("plugins", "indexUrl").count { json.containsKey(it) }
         require(shapes == 1) {
-            "A source document must declare exactly one of plugins, sources, or indexUrl."
+            "A source document must declare exactly one of plugins or indexUrl."
         }
-        return when {
-            json.containsKey("plugins") -> SubscriptionContent.PluginCatalog
-            json.containsKey("sources") -> SubscriptionContent.Collection(collection(json, allowHttp))
-            else -> SubscriptionContent.Pointer(pointer(json, allowHttp))
-        }
-    }
-
-    fun collection(json: JsonObject, allowHttp: Boolean): SubscriptionCollection {
-        val name = json["name"]?.jsonPrimitive?.content
-            ?: throw IllegalArgumentException("A collection must declare its name.")
-        require(name.length <= 120) { "A collection name exceeds 120 characters." }
-        val entries = PluginJson.decodeFromJsonElement(ListSerializer(String.serializer()), json.getValue("sources"))
-        require(entries.isNotEmpty()) { "A collection must list at least one source." }
-        require(entries.size <= MAX_SOURCES) { "A collection may list at most $MAX_SOURCES sources." }
-        entries.forEachIndexed { index, url ->
-            require(url.length <= MAX_URL_LENGTH) { "Collection entry ${index + 1} exceeds $MAX_URL_LENGTH characters." }
-            PluginUrlPolicy.check(url, allowHttp)
-        }
-        require(entries.distinctBy { it.trimEnd('/') }.size == entries.size) {
-            "A collection lists the same source twice."
-        }
-        return SubscriptionCollection(name, entries.map { it.trim() })
+        return if (json.containsKey("plugins")) SubscriptionContent.PluginCatalog
+        else SubscriptionContent.Pointer(pointer(json, allowHttp))
     }
 
     fun pointer(json: JsonObject, allowHttp: Boolean): SubscriptionPointer {

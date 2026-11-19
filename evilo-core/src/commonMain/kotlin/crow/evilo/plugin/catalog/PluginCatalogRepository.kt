@@ -6,7 +6,6 @@ import crow.evilo.plugin.api.PluginDescriptor
 import crow.evilo.plugin.api.PluginJson
 import crow.evilo.plugin.subscription.SubscriptionContent
 import crow.evilo.plugin.subscription.SubscriptionIndex
-import crow.evilo.plugin.subscription.SubscriptionCollection
 import crow.evilo.plugin.subscription.SubscriptionParser
 import crow.evilo.plugin.subscription.SubscriptionPointer
 import crow.evilo.plugin.subscription.indexAsCatalog
@@ -240,9 +239,8 @@ class PluginCatalogRepository(
     }
 
     /**
-     * Adds one address. A plugin catalog and a signed pointer become one source; a
-     * collection expands into one source per repository it lists, because the collection
-     * document carries no plugin data of its own.
+     * Adds one address. A plugin catalog and a signed pointer both become one source: a
+     * pointer's index already lists every plugin, so no address needs a request per plugin.
      */
     suspend fun addSource(url: String, allowHttp: Boolean) {
         val checked = PluginUrlPolicy.check(url.trim(), allowHttp).toString()
@@ -251,38 +249,16 @@ class PluginCatalogRepository(
         }
         // Network work stays outside the mutex, as in refresh.
         val text = download(checked, allowHttp)
-        val content = classifySafely(text, allowHttp)
-        val catalog = when (content) {
-            is SubscriptionContent.Collection -> null
+        val catalog = when (val content = classifySafely(text, allowHttp)) {
             is SubscriptionContent.Pointer -> fetchIndex(content.document, allowHttp)
             else -> parseCatalog(text, allowHttp)
         }
-        val added = operations.withLock {
-            if (content is SubscriptionContent.Collection) addCollection(content.document, allowHttp)
-            else addCatalogSource(checked, allowHttp, requireNotNull(catalog))
-        }
-        require(added.isNotEmpty()) { "This plugin source is already subscribed." }
-        if (content is SubscriptionContent.Collection) {
-            // Each listed repository is a separate source and needs its own document.
-            val sources = operations.withLock { mutableState.value.subscriptions.filter { it.id in added } }
-            fetchInBatches(sources)
-        }
+        operations.withLock { addCatalogSource(checked, allowHttp, catalog) }
     }
 
-    private suspend fun addCatalogSource(url: String, allowHttp: Boolean, catalog: PluginCatalog): List<String> {
-        val id = newSourceId(url)
-        val source = CatalogSubscription(id = id, url = url, allowHttp = allowHttp)
+    private suspend fun addCatalogSource(url: String, allowHttp: Boolean, catalog: PluginCatalog) {
+        val source = CatalogSubscription(newSourceId(url), url, allowHttp)
         publishSources(listOf(source), mapOf(source.id to catalog))
-        return listOf(id)
-    }
-
-    private suspend fun addCollection(collection: SubscriptionCollection, allowHttp: Boolean): List<String> {
-        val existing = mutableState.value.subscriptions.map { it.url }.toSet()
-        val fresh = collection.sources.map { it.trim() }.distinct().filterNot { it in existing }
-        require(fresh.isNotEmpty()) { "Every repository in this collection is already subscribed." }
-        val sources = fresh.map { url -> CatalogSubscription(newSourceId(url), url, allowHttp) }
-        publishSources(sources, emptyMap())
-        return sources.map { it.id }
     }
 
     /** Adds the sources, their catalogs, and their version floors in one write. */
@@ -533,9 +509,6 @@ class PluginCatalogRepository(
         val text = download(url, subscription.allowHttp)
         return when (val content = classifySafely(text, subscription.allowHttp)) {
             is SubscriptionContent.PluginCatalog -> parseCatalog(text, subscription.allowHttp)
-            is SubscriptionContent.Collection -> throw SourceFailure.Invalid(
-                "this address is a subscription collection listing ${content.document.sources.size} repositories; " +
-                    "subscribe to one of them instead")
             is SubscriptionContent.Pointer -> fetchIndex(content.document, subscription.allowHttp)
             null -> parseCatalog(text, subscription.allowHttp)
         }

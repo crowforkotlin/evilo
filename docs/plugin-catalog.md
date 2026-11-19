@@ -48,38 +48,17 @@ typed catalog, URL policies, and release relationships.
 A plugin source describes plugins. A **subscription** describes sources, so one
 address can bring in many publishers without the user pasting each URL.
 
-Three document shapes are recognised by their fields, so an existing plugin
-catalog keeps working unchanged:
+Two document shapes are recognised by their fields, so an existing plugin catalog
+keeps working unchanged:
 
 | Shape | Declares | Meaning |
 | --- | --- | --- |
 | Plugin source | `plugins` | The document itself lists installable plugins |
-| Collection | `sources` | A hand-maintained list of plugin source URLs |
 | Subscription pointer | `indexUrl` | A signed index that already lists every plugin |
 
-A document must declare exactly one of the three; declaring two or none is rejected.
-
-### Collection
-
-```json
-{
-  "name": "Awesome evilo plugins",
-  "sources": [
-    "https://raw.githubusercontent.com/alice/alice-plugin/main/catalog.json",
-    "https://raw.githubusercontent.com/bob/bob-plugin/main/catalog.json"
-  ]
-}
-```
-
-Subscribing to this address expands it: the app adds one source per listed
-repository and fetches each document once. Twenty repositories therefore cost
-twenty requests, so this shape suits a short, stable list; an index suits a large
-catalogue. Entries must be unique absolute HTTP(S) URLs. An entry that is itself a
-collection is not expanded again and is reported as a failing source.
-
-Removing one of the added sources leaves the others in place; the collection
-address is not stored after it is expanded, so adding it again only subscribes
-repositories that are missing.
+A document must declare exactly one of the two; declaring both or neither is rejected.
+A source address never costs one request per plugin: a pointer's index already holds
+every entry, including its newest release.
 
 ### Subscription pointer
 
@@ -126,7 +105,7 @@ the reference implementation:
 
 Because the index is rebuilt from scratch, a repository that publishes a new
 version, changes a description, or withdraws a release is reflected on the next
-build without editing the collection.
+build without editing the index.
 
 ## Compact example
 
