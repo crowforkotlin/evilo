@@ -1,6 +1,11 @@
 package crow.evilo.plugin.subscription
 
 import crow.evilo.network.ktor.PluginUrlPolicy
+import crow.evilo.plugin.catalog.CatalogParser
+import crow.evilo.plugin.catalog.normalizePluginJson
+import crow.evilo.plugin.catalog.CatalogPlugin
+import crow.evilo.plugin.catalog.PLUGIN_CATALOG_SCHEMA_VERSION
+import crow.evilo.plugin.catalog.PluginCatalog
 import crow.evilo.plugin.api.PluginJson
 import crow.evilo.plugin.subscription.crypto.Ed25519
 import kotlinx.serialization.Serializable
@@ -8,6 +13,7 @@ import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.int
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
@@ -37,16 +43,15 @@ data class SubscriptionIndex(
     val plugins: List<IndexedPlugin>,
 )
 
+/**
+ * One plugin as the index records it: where its own catalog lives, plus its newest
+ * release only. Carrying that release is what makes an index source installable
+ * without fetching every catalog first; older versions remain in the plugin's catalog.
+ */
 @Serializable
 data class IndexedPlugin(
     val catalogUrl: String,
-    val id: String,
-    val name: String,
-    val version: String,
-    val versionCode: Long,
-    val iconUrl: String = "",
-    val authors: List<String> = emptyList(),
-    val description: String = "",
+    val plugin: CatalogPlugin,
 )
 
 /** What an address actually served. */
@@ -60,6 +65,17 @@ sealed interface SubscriptionContent {
     /** A regular plugin catalog: this address is a plugin source, not a collection. */
     data object PluginCatalog : SubscriptionContent
 }
+
+/** Turns an index into the catalog shape the rest of the app already reads. */
+internal fun indexAsCatalog(plugins: List<IndexedPlugin>, name: String, updatedAt: String): PluginCatalog =
+    PluginCatalog(
+        schemaVersion = PLUGIN_CATALOG_SCHEMA_VERSION,
+        id = "subscription",
+        name = name,
+        description = "",
+        updatedAt = updatedAt.ifBlank { "1970-01-01T00:00:00Z" },
+        plugins = plugins.map { entry -> entry.plugin.copy(sourceUrl = entry.catalogUrl) },
+    )
 
 object SubscriptionParser {
     const val MAX_SOURCES = 4096
@@ -138,14 +154,26 @@ object SubscriptionParser {
         val schema = json["schemaVersion"]?.jsonPrimitive?.int
             ?: throw IllegalArgumentException("The index must declare schemaVersion.")
         require(schema == 1) { "Unsupported subscription index version $schema." }
-        val plugins = PluginJson.decodeFromJsonElement(ListSerializer(IndexedPlugin.serializer()), json.getValue("plugins"))
-        plugins.forEachIndexed { index, plugin ->
-            require(plugin.id.isNotBlank()) { "Index plugin ${index + 1} has no id." }
-            require(plugin.name.length <= 120) { "Index plugin ${index + 1} has an oversized name." }
-            PluginUrlPolicy.check(plugin.catalogUrl, allowHttp)
-            if (plugin.iconUrl.isNotEmpty()) PluginUrlPolicy.check(plugin.iconUrl, allowHttp)
+        // Each entry carries the same plugin object a catalog would, so the same
+        // normalization fills its optional fields; only the release list is narrowed to one.
+        val plugins = json.getValue("plugins").jsonArray.mapIndexed { index, element ->
+            val entry = element.jsonObject
+            val catalogUrl = entry["catalogUrl"]?.jsonPrimitive?.content
+                ?: throw IllegalArgumentException("Index entry ${index + 1} must declare its catalogUrl.")
+            PluginUrlPolicy.check(catalogUrl, allowHttp)
+            val plugin = PluginJson.decodeFromJsonElement(
+                CatalogPlugin.serializer(), normalizePluginJson(entry.getValue("plugin").jsonObject))
+            require(plugin.availableVersions.size == 1) {
+                "Index entry ${index + 1} must carry exactly its newest release."
+            }
+            IndexedPlugin(catalogUrl, plugin)
         }
-        require(plugins.distinctBy { it.id }.size == plugins.size) { "The index lists a plugin id twice." }
+        require(plugins.distinctBy { it.plugin.id }.size == plugins.size) { "The index lists a plugin id twice." }
+        // Reuse the catalog rules rather than restating them: the same field limits, URL
+        // policy, and digest format apply to an indexed plugin as to a published one.
+        CatalogParser().validate(indexAsCatalog(plugins,
+            json["name"]?.jsonPrimitive?.content ?: pointer.name,
+            json["updatedAt"]?.jsonPrimitive?.content.orEmpty()), allowHttp)
         return SubscriptionIndex(schema, json["name"]?.jsonPrimitive?.content ?: pointer.name,
             json["updatedAt"]?.jsonPrimitive?.content ?: "", plugins)
     }

@@ -103,10 +103,11 @@ A host that swaps the index, the signature, or the public key therefore fails
 unless it also controls the fingerprint the user subscribed to. One thousand
 repositories cost two requests: the pointer and the index.
 
-The index carries `id`, `name`, `version`, `versionCode`, `iconUrl`, `authors`,
-`description`, and `catalogUrl` per plugin. The list renders from those fields;
-opening a plugin fetches its own catalog, which stays authoritative for releases,
-signatures, and source archives.
+Each index entry records the plugin's own `catalogUrl` and the plugin object a
+catalog would publish, narrowed to its newest release. The list renders from that
+object, and installation works from it too, so a subscriber does not fetch every
+plugin catalog first. Older versions stay in the plugin's own catalog, which
+remains authoritative for its full release history.
 
 ### Publishing a subscription
 

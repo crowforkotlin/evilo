@@ -2,7 +2,8 @@ package crow.evilo.plugin.catalog
 
 import crow.evilo.network.ktor.BoundedHttpTransport
 import crow.evilo.plugin.api.HostDescriptor
-import crow.evilo.plugin.api.PluginJson
+import crow.evilo.plugin.api.HOST_MEDIA_CAPABILITY
+import crow.evilo.plugin.subscription.SubscriptionFixture
 import crow.evilo.storage.EviloPreferences
 import crow.evilo.storage.EviloPreferencesRepository
 import crow.evilo.storage.MemoryDataStore
@@ -17,60 +18,66 @@ import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 /**
- * Drives a real subscription address through the repository: pointer, key, signature,
- * index, then a catalog. The artifacts under /tmp were produced by
- * evilo-subscribe-template/scripts/build_index.py, so producer and consumer are checked
- * against each other.
+ * Drives a subscription address through the repository: pointer, key, signature, index,
+ * then the catalog the rest of the app reads. The fixture bytes are the ones the builder
+ * signs, so this covers the producer and the consumer together without a network.
  */
 class SubscriptionSourceTest {
     private val base = "https://subscription.example.com"
-    private val files: Map<String, ByteArray> = mapOf(
-        // The pointer is regenerated against this fixture's base so no localhost leaks in.
-        "/repo.json" to java.io.File("/tmp/evilo-subscription-demo-index/repo.json").readText()
-            .replace(Regex("\"indexUrl\": \"[^\"]*\""), "\"indexUrl\": \"$base/index.json\"")
-            .encodeToByteArray(),
-        "/index.json" to java.io.File("/tmp/evilo-subscription-demo-index/index.json").readBytes(),
-        "/index.json.sig" to java.io.File("/tmp/evilo-subscription-demo-index/index.json.sig").readBytes(),
-        "/index.json.pub" to java.io.File("/tmp/evilo-subscription-demo-index/index.json.pub").readBytes(),
+
+    private fun files(): Map<String, ByteArray> = mapOf(
+        "/repo.json" to SubscriptionFixture.pointer("$base/index.json").encodeToByteArray(),
+        "/index.json" to SubscriptionFixture.INDEX_BODY.encodeToByteArray(),
+        "/index.json.sig" to (SubscriptionFixture.SIGNATURE_HEX + "\n").encodeToByteArray(),
+        "/index.json.pub" to (SubscriptionFixture.PUBLIC_KEY_HEX + "\n").encodeToByteArray(),
     )
 
-    private fun repository(fault: (String) -> HttpStatusCode? = { null }): Pair<PluginCatalogRepository, BoundedHttpTransport> {
+    private fun repository(fault: (String) -> HttpStatusCode? = { null }):
+        Pair<PluginCatalogRepository, BoundedHttpTransport> {
+        val content = files()
         val transport = BoundedHttpTransport(HttpClient(MockEngine { request ->
             val path = request.url.encodedPath
-            println("REQ ${request.url}")
-            val bytes = files[path]
+            val bytes = content[path]
+            val forced = fault(path)
             when {
-                bytes == null -> respond("missing", HttpStatusCode.NotFound)
-                fault(path) != null -> respond("denied", fault(path)!!)
+                bytes == null || forced != null -> respond("missing", forced ?: HttpStatusCode.NotFound)
                 else -> respond(bytes, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
             }
         }) { followRedirects = false }, requestTimeoutMillis = 0)
         val preferences = EviloPreferencesRepository(MemoryDataStore(EviloPreferences()))
         return PluginCatalogRepository(MemoryPluginCatalogStore(), preferences, transport,
-            HostDescriptor("1.0.0", 1, capabilities = setOf(crow.evilo.plugin.api.HOST_MEDIA_CAPABILITY))) to transport
+            HostDescriptor("1.0.0", 1, capabilities = setOf(HOST_MEDIA_CAPABILITY))) to transport
     }
 
     @Test
-    fun aPointerResolvesToTheIndexPlugins() = runBlocking {
+    fun aPointerResolvesToAnInstallablePlugin() = runBlocking {
         val (repository, transport) = repository()
         try {
             repository.initialize("""{"name":"bundled","plugins":[]}""")
-            // Rewrite the pointer so it names this fixture's absolute address.
             repository.addSource("$base/repo.json", allowHttp = false)
-            val snapshot = repository.state.value.snapshots.first { it.subscription.url == "$base/repo.json" }
-            assertEquals(listOf("com.alice.novel", "com.bob.manga", "com.carol.anime"),
-                snapshot.catalog.plugins.map { it.id })
+            // The published plugin is classified NSFW, so the preference must be on before
+            // it is installable; that is app policy, not a gap in the index.
+            repository.setShowNsfw(true)
+            val listing = repository.state.value.listings.single { it.snapshot.subscription.url == "$base/repo.json" }
+            assertEquals("crow.evilo.source.copymanga", listing.plugin.id)
+            // A listing with no releasable version would appear in Browse but not install.
+            val release = assertNotNull(repository.recommendedRelease(listing))
+            assertEquals(1L, release.versionCode)
+            assertEquals("1.0.0", release.version)
         } finally {
             transport.close()
         }
     }
 
     @Test
-    fun aSignedIndexWithABadSignatureIsRejected() = runBlocking {
-        val (repository, transport) = repository(fault = { path -> if (path == "/index.json.sig") HttpStatusCode.NotFound else null })
+    fun aMissingSignatureIsReportedAsAnHttpFailure() = runBlocking {
+        val (repository, transport) = repository(fault = { path ->
+            if (path == "/index.json.sig") HttpStatusCode.NotFound else null
+        })
         try {
             repository.initialize("""{"name":"bundled","plugins":[]}""")
             val failure = assertFailsWith<SourceFailure> { repository.addSource("$base/repo.json", false) }

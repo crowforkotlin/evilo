@@ -8,6 +8,7 @@ import crow.evilo.plugin.subscription.SubscriptionContent
 import crow.evilo.plugin.subscription.SubscriptionIndex
 import crow.evilo.plugin.subscription.SubscriptionParser
 import crow.evilo.plugin.subscription.SubscriptionPointer
+import crow.evilo.plugin.subscription.indexAsCatalog
 import crow.evilo.network.ktor.BoundedHttpTransport
 import crow.evilo.network.ktor.HttpRedirectRejectedException
 import crow.evilo.network.ktor.HttpResponseLimitException
@@ -503,35 +504,16 @@ class PluginCatalogRepository(
         } catch (failure: IllegalArgumentException) {
             throw SourceFailure.Untrusted(failure.message ?: "the index signature does not verify")
         }
-        return indexAsCatalog(index, allowHttp)
+        return indexCatalog(index, allowHttp)
     }
 
     /**
-     * The index carries list-level metadata only, so it becomes a catalog whose releases
-     * are fetched on demand from each plugin's own catalog. A catalog needs at least one
-     * release to be valid, so the summary is kept as a plugin with an empty release list
-     * and the catalog parser is bypassed for this shape.
+     * An index entry already holds the newest release, so the source is installable after
+     * this one fetch. Older versions remain in the plugin's own catalog, which the detail
+     * page links to through the recorded source URL.
      */
-    private fun indexAsCatalog(index: SubscriptionIndex, allowHttp: Boolean): PluginCatalog =
-        PluginCatalog(PLUGIN_CATALOG_SCHEMA_VERSION, "subscription", index.name, "", index.updatedAt,
-            index.plugins.map { plugin ->
-                CatalogPlugin(
-                    id = plugin.id,
-                    name = plugin.name,
-                    authors = plugin.authors.map { PluginAuthor(it) },
-                    overseas = false,
-                    languages = emptyList(),
-                    kinds = emptySet(),
-                    nsfw = false,
-                    description = plugin.description,
-                    sourceUrl = plugin.catalogUrl,
-                    iconUrl = plugin.iconUrl,
-                    version = plugin.version,
-                    createdAt = index.updatedAt,
-                    updatedAt = index.updatedAt,
-                    availableVersions = emptyList(),
-                )
-            })
+    private fun indexCatalog(index: SubscriptionIndex, allowHttp: Boolean): PluginCatalog =
+        parser.validate(indexAsCatalog(index.plugins, index.name, index.updatedAt), allowHttp)
 
     private suspend fun download(url: String, allowHttp: Boolean): String =
         downloadBytes(url, allowHttp).decodeToString(throwOnInvalidSequence = true)

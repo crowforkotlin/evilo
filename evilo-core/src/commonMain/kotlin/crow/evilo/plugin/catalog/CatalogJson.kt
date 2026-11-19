@@ -23,7 +23,7 @@ internal fun normalizeCatalogJson(catalog: JsonObject): JsonObject {
     )
 }
 
-private fun normalizePluginJson(plugin: JsonObject): JsonObject {
+internal fun normalizePluginJson(plugin: JsonObject): JsonObject {
     val versions = requireNotNull(plugin["availableVersions"]) { "A plugin must declare its availableVersions list." }.jsonArray
     require(versions.isNotEmpty()) { "A plugin must list at least one available version." }
     val fields = plugin.toMutableMap()
