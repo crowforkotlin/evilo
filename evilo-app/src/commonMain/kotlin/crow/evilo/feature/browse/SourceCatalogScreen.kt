@@ -19,6 +19,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import crow.evilo.app.EviloImages
 import crow.evilo.app.resources.*
@@ -39,7 +40,10 @@ internal fun SourceCatalogScreen(state: PluginHomeState, id: String, images: Evi
 @Composable
 private fun SourceCatalogContent(state: PluginHomeState, id: String, images: EviloImages, dispatch: (PluginHomeIntent) -> Unit) {
     val source = state.catalog.subscriptions.firstOrNull { it.id == id } ?: return
-    val projection = projectSourceCatalog(state, id)
+    // Computed per input change, not per recomposition: the transition animates this screen.
+    val projection = remember(state.entries, state.catalog, state.sourceFilters[id], state.sourceQueries[id], id) {
+        projectSourceCatalog(state, id)
+    }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val padding = if (maxWidth >= EviloLayout.ExpandedBreakpoint) EviloLayout.WidePagePadding else EviloLayout.PagePadding
         LazyVerticalGrid(columns = GridCells.Adaptive(EviloLayout.PluginCardMinWidth), modifier = Modifier.fillMaxSize(),

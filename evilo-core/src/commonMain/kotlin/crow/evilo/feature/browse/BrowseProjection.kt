@@ -141,18 +141,30 @@ data class SourceCatalogProjection(val entries: List<PluginEntry>, val hiddenNsf
 
 fun projectSourceCatalog(state: PluginHomeState, sourceId: String): SourceCatalogProjection {
     val filter = state.sourceFilters[sourceId] ?: CatalogFilter.ALL
-    val entries = state.entries.values.filter { entry -> entry.sourceId == sourceId && when (filter) {
-        CatalogFilter.INSTALLED -> entry.installation?.release?.kinds?.contains(state.catalog.selectedKind) == true
-        CatalogFilter.ALL -> state.catalog.selectedKind in entry.plugin.kinds ||
-            entry.installation?.release?.kinds?.contains(state.catalog.selectedKind) == true
-    } }
-    val hidden = entries.filter { !state.catalog.showNsfw && (it.plugin.nsfw || state.catalog.isPluginNsfw(it.plugin.id)) }
+    val kind = state.catalog.selectedKind
+    val showNsfw = state.catalog.showNsfw
     val query = state.sourceQueries[sourceId].orEmpty().trim()
-    return SourceCatalogProjection((entries - hidden.toSet()).filter { entry ->
-        (filter != CatalogFilter.INSTALLED || entry.installation != null) &&
-            (query.isEmpty() || (entry.plugin.name + " " + entry.plugin.description + " " +
-                entry.plugin.authors.joinToString { it.name }).contains(query, ignoreCase = true))
-    }.sortedWith(compareBy<PluginEntry> { it.plugin.name.lowercase() }.thenBy { it.key }), hidden.size)
+    var hidden = 0
+    val visible = ArrayList<Pair<PluginEntry, String>>()
+    for (entry in state.entries.values) {
+        if (entry.sourceId != sourceId) continue
+        val matchesKind = when (filter) {
+            CatalogFilter.INSTALLED -> entry.installation?.release?.kinds?.contains(kind) == true
+            CatalogFilter.ALL -> kind in entry.plugin.kinds || entry.installation?.release?.kinds?.contains(kind) == true
+        }
+        if (!matchesKind) continue
+        if (filter == CatalogFilter.INSTALLED && entry.installation == null) continue
+        if (!showNsfw && (entry.plugin.nsfw || state.catalog.isPluginNsfw(entry.plugin.id))) {
+            hidden++
+            continue
+        }
+        if (query.isNotEmpty() && !(entry.plugin.name + " " + entry.plugin.description + " " +
+                entry.plugin.authors.joinToString { it.name }).contains(query, ignoreCase = true)) continue
+        // Lowercase once per entry: a comparator would allocate it on every comparison.
+        visible += entry to entry.plugin.name.lowercase()
+    }
+    visible.sortWith(compareBy({ it.second }, { it.first.key }))
+    return SourceCatalogProjection(visible.map { it.first }, hidden)
 }
 
 data class InstalledSourceGroup(val sourceId: String, val entries: List<PluginEntry>)

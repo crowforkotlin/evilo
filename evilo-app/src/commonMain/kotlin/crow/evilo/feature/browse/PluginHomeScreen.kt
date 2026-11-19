@@ -228,8 +228,15 @@ private fun PluginHomeScreen(state: PluginHomeState, images: EviloImages, host: 
                                     null -> when (displayed.destination) {
                                         HomeDestination.BROWSE -> EviloContentTransition(displayed.catalog.selectedKind, label = "browse-kind") {
                                             kind -> savedPages.SaveableStateProvider("browse:$kind") {
+                                                // The transition recomposes every frame, so the projection is
+                                                // computed once per input change rather than per frame.
+                                                val projection = remember(displayed.entries, displayed.catalog, kind,
+                                                    displayed.query, displayed.browseSourceId, searchLabels) {
+                                                    projectBrowse(displayed.catalog.copy(selectedKind = kind),
+                                                        displayed.entries, kind, displayed.query, displayed.browseSourceId, searchLabels)
+                                                }
                                                 PluginBrowseScreen(displayed.copy(catalog = displayed.catalog.copy(selectedKind = kind),
-                                                    browse = projectBrowse(displayed.catalog, displayed.entries, kind, displayed.query, displayed.browseSourceId, searchLabels)), images, dispatch,
+                                                    browse = projection), images, dispatch,
                                                     enabled = kind == displayed.catalog.selectedKind)
                                             }
                                         }

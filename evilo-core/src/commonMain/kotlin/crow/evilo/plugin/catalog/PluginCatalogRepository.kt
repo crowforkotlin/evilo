@@ -20,6 +20,7 @@ import crow.evilo.storage.EviloPreferencesRepository
 import crow.evilo.storage.PluginCatalogStore
 import crow.wasmline.loader.WasmlineTrustedKeys
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -495,7 +496,9 @@ class PluginCatalogRepository(
     private suspend fun persistAndPublish(change: CatalogWrite, publish: () -> Unit) {
         currentCoroutineContext().ensureActive()
         // Cancellation cannot leave live state behind a database transaction that already committed.
-        withContext(NonCancellable) {
+        // The catalogue is serialized and written here, which is CPU and IO work: a caller on the
+        // main thread must not pay for it. Publishing state is safe from any thread.
+        withContext(NonCancellable + Dispatchers.Default) {
             records.write(change)
             publish()
         }
@@ -508,10 +511,13 @@ class PluginCatalogRepository(
     private suspend fun fetch(subscription: CatalogSubscription): PluginCatalog {
         val url = PluginUrlPolicy.check(subscription.url, subscription.allowHttp).toString()
         val text = download(url, subscription.allowHttp)
-        return when (val content = classifySafely(text, subscription.allowHttp)) {
-            is SubscriptionContent.PluginCatalog -> parseCatalog(text, subscription.allowHttp)
+        val content = withContext(Dispatchers.Default) { classifySafely(text, subscription.allowHttp) }
+        return when (content) {
+            is SubscriptionContent.PluginCatalog -> withContext(Dispatchers.Default) {
+                parseCatalog(text, subscription.allowHttp)
+            }
             is SubscriptionContent.Pointer -> fetchIndex(content.document, subscription.allowHttp)
-            null -> parseCatalog(text, subscription.allowHttp)
+            null -> withContext(Dispatchers.Default) { parseCatalog(text, subscription.allowHttp) }
         }
     }
 
@@ -538,13 +544,15 @@ class PluginCatalogRepository(
             SubscriptionParser.publicKey(hex)
         }
         val index = try {
-            SubscriptionParser.verifyIndex(pointer, indexBytes, signature, publicKey, allowHttp)
+            withContext(Dispatchers.Default) {
+                SubscriptionParser.verifyIndex(pointer, indexBytes, signature, publicKey, allowHttp)
+            }
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (failure: IllegalArgumentException) {
             throw SourceFailure.Untrusted(failure.message ?: "the index signature does not verify")
         }
-        return indexCatalog(index, allowHttp)
+        return withContext(Dispatchers.Default) { indexCatalog(index, allowHttp) }
     }
 
     /**
