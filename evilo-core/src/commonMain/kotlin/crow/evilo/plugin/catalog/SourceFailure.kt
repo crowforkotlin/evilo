@@ -7,7 +7,7 @@ package crow.evilo.plugin.catalog
  */
 sealed class SourceFailure(message: String, cause: Throwable? = null) : Exception(message, cause) {
     /** The server answered, but not with a successful status. */
-    class HttpStatus(val statusCode: Int) : SourceFailure("The source returned HTTP $statusCode.")
+    class HttpStatus(val host: String, val statusCode: Int) : SourceFailure("$host returned HTTP $statusCode.")
 
     /** The server answered with a redirect, which the host never follows. */
     class Redirect(val statusCode: Int) :
@@ -17,8 +17,13 @@ sealed class SourceFailure(message: String, cause: Throwable? = null) : Exceptio
     class TooLarge(val maxBytes: Long) :
         SourceFailure("The source document exceeds $maxBytes bytes.")
 
-    /** The host never got a response. */
-    class Unreachable(cause: Throwable?) : SourceFailure("Cannot reach the source host.", cause)
+    /** The host never answered. The address is part of the message so the user can check it. */
+    class Unreachable(val host: String, cause: Throwable? = null) :
+        SourceFailure("Cannot reach $host.", cause)
+
+    /** A connection was made, but the answer never arrived. */
+    class Timeout(val host: String, val millis: Long) :
+        SourceFailure("$host did not answer within ${millis / 1000} s.")
 
     /** The host got a response but it is not JSON. */
     class NotJson(cause: Throwable?) : SourceFailure("The address does not return JSON.", cause)

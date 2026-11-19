@@ -13,6 +13,7 @@ import crow.evilo.network.ktor.BoundedHttpTransport
 import crow.evilo.network.ktor.HttpRedirectRejectedException
 import crow.evilo.network.ktor.HttpResponseLimitException
 import crow.evilo.network.ktor.HttpTransportException
+import crow.evilo.network.ktor.HttpTransportTimeoutException
 import crow.evilo.network.ktor.PluginUrlPolicy
 import crow.evilo.storage.CatalogWrite
 import crow.evilo.storage.EviloPreferencesRepository
@@ -558,7 +559,9 @@ class PluginCatalogRepository(
         downloadBytes(url, allowHttp).decodeToString(throwOnInvalidSequence = true)
 
     private suspend fun downloadBytes(url: String, allowHttp: Boolean): ByteArray {
-        val checked = PluginUrlPolicy.check(url, allowHttp).toString()
+        val parsed = PluginUrlPolicy.check(url, allowHttp)
+        val checked = parsed.toString()
+        val target = "${parsed.protocol.name}://${parsed.host}${if (parsed.port == parsed.protocol.defaultPort) "" else ":${parsed.port}"}"
         val response = try {
             transport.fetch(checked, mapOf("Accept" to "application/json"), MAX_CATALOG_BYTES)
         } catch (cancelled: CancellationException) {
@@ -567,12 +570,14 @@ class PluginCatalogRepository(
             throw SourceFailure.Redirect(redirect.statusCode)
         } catch (limit: HttpResponseLimitException) {
             throw SourceFailure.TooLarge(limit.maxBytes)
+        } catch (timeout: HttpTransportTimeoutException) {
+            throw SourceFailure.Timeout(target, timeout.timeoutMillis)
         } catch (unreachable: HttpTransportException) {
-            throw SourceFailure.Unreachable(unreachable)
+            throw SourceFailure.Unreachable(target, unreachable)
         } catch (failure: Exception) {
-            throw SourceFailure.Unreachable(failure)
+            throw SourceFailure.Unreachable(target, failure)
         }
-        if (response.statusCode !in 200..299) throw SourceFailure.HttpStatus(response.statusCode)
+        if (response.statusCode !in 200..299) throw SourceFailure.HttpStatus(target, response.statusCode)
         return response.bytes
     }
 
