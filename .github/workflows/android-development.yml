@@ -23,6 +23,10 @@ jobs:
           echo "Android SDK at $ANDROID_HOME"
 
       - name: Run the portable tests
+        env:
+          # The app configuration task needs the authority; without it the task falls back
+          # to a local key file that a runner does not have.
+          EVILO_PUBLIC_KEY_HEX: ${{ secrets.EVILO_PUBLIC_KEY_HEX }}
         run: ./gradlew :evilo-core:jvmTest :evilo-app:jvmTest --no-daemon --no-configuration-cache
 
       - name: Build development APK with the preserved official public key
