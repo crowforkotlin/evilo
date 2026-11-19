@@ -14,7 +14,17 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-      - uses: android-actions/setup-android@v3
+      # The runner image ships the Android SDK. The setup-android action is not used:
+      # its default package list still requests the removed `tools` package and fails
+      # before any Gradle task runs.
+      - name: Check the preinstalled Android SDK
+        run: |
+          test -n "$ANDROID_HOME" && test -d "$ANDROID_HOME" || { echo 'No Android SDK on the runner.'; exit 1; }
+          echo "Android SDK at $ANDROID_HOME"
+
+      - name: Run the portable tests
+        run: ./gradlew :evilo-core:jvmTest :evilo-app:jvmTest --no-daemon --no-configuration-cache
+
       - name: Build development APK with the preserved official public key
         env:
           EVILO_PUBLIC_KEY_HEX: ${{ secrets.EVILO_PUBLIC_KEY_HEX }}
