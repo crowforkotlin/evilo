@@ -160,12 +160,14 @@ Written tests, all unexecuted:
 3. Obtain the actual platform and redacted image error. Preserve real HTTP status,
    response type, final-address/redirect behavior and approved-header evidence;
    do not copy credentials, cookies, signed query values or private paths.
-4. `MediaCatalog` and `MediaDetails` still pass `emptyMap()` for covers because
-   `MediaItem` only has `coverUrl`. If evidence confirms a need for cover headers,
-   design an optional default-empty SDK field, host/legacy-adapter serialization,
-   and protocol minor/capability behavior before implementing it. Never hardcode
-   provider headers or forward ambient cookies. Browser forbidden-header/CORS
-   restrictions remain even after a portable field is added.
+4. `MediaCatalog` and `MediaDetails` pass `emptyMap()` for covers because
+   `MediaItem` only has `coverUrl`. `PluginNetworkPolicy.mediaRequest` now supplies
+   the generic `User-Agent: evilo` when the plugin approves `user-agent` and the
+   request omits it; explicit page headers remain unchanged. The supplied
+   2026-11-17 interface notes report that the image CDN requires any non-empty UA.
+   This change has not been tested against live images or an installed app. Other
+   provider-specific cover headers still require an SDK contract decision;
+   browser forbidden-header/CORS restrictions remain.
 5. No offline plugin loading, automatic updates, theme/font switches, disk-cache
    cleanup, bookshelf/history/downloads, account sync, new trust authority, or
    upstream Wasmline changes were added. Extreme image aspect ratios keep the
