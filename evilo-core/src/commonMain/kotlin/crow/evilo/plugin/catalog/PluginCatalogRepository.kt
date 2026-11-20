@@ -104,9 +104,11 @@ class PluginCatalogRepository(
         }
         val subscriptions = listOf(saved.firstOrNull { it.id == BUNDLED_SOURCE_ID } ?: bundledSource) +
             saved.filterNot { it.id == BUNDLED_SOURCE_ID }
-        val bundled = parser.parse(bundledJson, false)
+        // Every cached catalogue is decoded here, which is the whole startup cost for a
+        // large source. It runs on the default dispatcher because the caller is the main thread.
+        val bundled = withContext(Dispatchers.Default) { parser.parse(bundledJson, false) }
         val legacyCache = stored.cachedCatalogs[LEGACY_BUNDLED_SOURCE_ID]
-        val snapshots = subscriptions.mapNotNull { source ->
+        val snapshots = withContext(Dispatchers.Default) { subscriptions.mapNotNull { source ->
             val cachedJson = stored.cachedCatalogs[source.id] ?: legacyCache.takeIf { source.id == BUNDLED_SOURCE_ID }
             val cached = cachedJson?.let { parser.parse(it, source.allowHttp) }?.let { catalog ->
                 if (source.id == BUNDLED_SOURCE_ID && catalog.id == LEGACY_BUNDLED_CATALOG_ID)
@@ -116,14 +118,14 @@ class PluginCatalogRepository(
             (cached ?: bundled.takeIf { source.id == BUNDLED_SOURCE_ID })?.let {
                 CatalogSnapshot(source, it, fromCache = cached != null)
             }
-        }
+        } }
         val installed = stored.installed.map { installation ->
             if (installation.sourceId == LEGACY_BUNDLED_SOURCE_ID)
                 installation.copy(sourceId = BUNDLED_SOURCE_ID, sourceUrl = migrateBundledUrl(installation.sourceUrl))
             else installation
         }
         require(installed.distinctBy { it.key }.size == installed.size) { "Invalid stored installations." }
-        installed.forEach { installation ->
+        withContext(Dispatchers.Default) { installed.forEach { installation ->
             parser.validate(PluginCatalog(PLUGIN_CATALOG_SCHEMA_VERSION, "stored", "Stored", "",
                 installation.plugin.updatedAt, listOf(installation.plugin)), installation.allowHttp)
             require(installation.release in installation.plugin.availableVersions) { "Stored installation has no matching release." }
@@ -133,7 +135,7 @@ class PluginCatalogRepository(
                     "Stored manifest approval does not match the installed release."
                 }
             }
-        }
+        } }
         require(stored.updateFloors.values.all { it >= 1 }) { "Invalid stored mandatory version floors." }
         updateFloors = buildMap {
             stored.updateFloors.forEach { (key, versionCode) ->
