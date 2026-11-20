@@ -1,12 +1,15 @@
 package crow.evilo.feature.browse
 
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -15,7 +18,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
@@ -24,6 +26,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarDefaults
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.NavigationRail
@@ -33,9 +36,21 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
@@ -45,12 +60,15 @@ import androidx.compose.ui.text.style.TextAlign
 import crow.evilo.app.resources.*
 import crow.evilo.model.MediaKind
 import crow.evilo.plugin.catalog.PluginRepositoryState
+import crow.evilo.ui.EviloContentSelectorShape
+import crow.evilo.ui.EviloDockGeometry
 import crow.evilo.ui.EviloElevation
-import crow.evilo.ui.EviloContentTransition
 import crow.evilo.ui.EviloLayout
 import crow.evilo.ui.EviloIcons
 import crow.evilo.ui.EviloMotion
 import crow.evilo.ui.EviloSpacing
+import crow.evilo.ui.LocalEviloPageActive
+import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 
 @Composable
@@ -61,11 +79,33 @@ internal fun CompactHomeNavigation(
     onKind: () -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
-    Box(Modifier.fillMaxWidth()) {
+    val insets = NavigationBarDefaults.windowInsets
+    val density = LocalDensity.current
+    val layoutDirection = LocalLayoutDirection.current
+    val leftInset = insets.getLeft(density, layoutDirection)
+    val rightInset = insets.getRight(density, layoutDirection)
+    val selector = rememberContentSelectorMorph(kind)
+    Box(Modifier.fillMaxWidth().drawWithCache {
+        val centerX = (size.width + leftInset - rightInset) / 2f
+        val path = EviloDockGeometry.barPath(
+            size = size,
+            centerX = centerX,
+            barTop = EviloLayout.NavigationOverlap.toPx(),
+            fabRadius = EviloLayout.ContentSelectorSize.toPx() / 2f,
+            clearance = EviloLayout.NavigationFabClearance.toPx(),
+            shoulderRadius = EviloLayout.NavigationShoulderRadius.toPx(),
+            progress = selector.animation.value,
+        )
+        // Paint through the bottom/system insets, but leave the concavity transparent.
+        // Do not clip the NavigationBar: its items keep their Material ripple and semantics.
+        onDrawBehind { drawPath(path, colors.surfaceContainer) }
+    }) {
         NavigationBar(
             Modifier.padding(top = EviloLayout.NavigationOverlap),
-            containerColor = colors.surfaceContainer,
+            containerColor = Color.Transparent,
+            contentColor = colors.onSurface,
             tonalElevation = EviloElevation.Flat,
+            windowInsets = insets,
         ) {
             HomeDestination.entries.forEachIndexed { index, tab ->
                 if (index == 1) Spacer(Modifier.width(EviloLayout.NavigationCenterSlot))
@@ -84,17 +124,23 @@ internal fun CompactHomeNavigation(
                 )
             }
         }
-        ContentTypeButton(kind, onKind, Modifier.align(Alignment.TopCenter))
-        Text(
-            mediaKindLabel(kind),
-            Modifier.align(Alignment.TopCenter).width(EviloLayout.NavigationCenterSlot)
-                .padding(top = EviloLayout.NavigationLabelOffset),
-            style = MaterialTheme.typography.labelMedium,
-            color = colors.primary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center,
-        )
+        Column(
+            Modifier.fillMaxWidth().windowInsetsPadding(insets),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            ContentTypeButton(kind, onKind, selector.shape)
+            Text(
+                mediaKindLabel(kind),
+                Modifier.width(EviloLayout.NavigationCenterSlot)
+                    .padding(top = EviloLayout.NavigationLabelOffset - EviloLayout.ContentSelectorSize,
+                        bottom = EviloSpacing.Small),
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.primary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+            )
+        }
     }
 }
 
@@ -106,13 +152,14 @@ internal fun ExpandedHomeNavigation(
     onKind: () -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
+    val selector = rememberContentSelectorMorph(kind)
     NavigationRail(
         Modifier.fillMaxHeight().width(EviloLayout.RailWidth).verticalScroll(rememberScrollState()),
         containerColor = colors.surfaceContainerLow,
     ) {
         Text("evilo", Modifier.padding(top = EviloSpacing.ExtraLarge, bottom = EviloSpacing.Section),
             style = MaterialTheme.typography.titleMedium, color = colors.primary)
-        ContentTypeButton(kind, onKind)
+        ContentTypeButton(kind, onKind, selector.shape)
         Text(mediaKindLabel(kind), Modifier.padding(top = EviloSpacing.Small),
             style = MaterialTheme.typography.labelMedium, color = colors.primary)
         Spacer(Modifier.height(EviloSpacing.Section))
@@ -136,7 +183,7 @@ internal fun ExpandedHomeNavigation(
 }
 
 @Composable
-private fun ContentTypeButton(kind: MediaKind, onClick: () -> Unit, modifier: Modifier = Modifier) {
+private fun ContentTypeButton(kind: MediaKind, onClick: () -> Unit, shape: Shape, modifier: Modifier = Modifier) {
     val description = stringResource(Res.string.home_select_kind)
     val currentKind = mediaKindLabel(kind)
     FloatingActionButton(
@@ -145,18 +192,46 @@ private fun ContentTypeButton(kind: MediaKind, onClick: () -> Unit, modifier: Mo
             contentDescription = description
             stateDescription = currentKind
         },
-        shape = CircleShape,
+        shape = shape,
         containerColor = MaterialTheme.colorScheme.primary,
         contentColor = MaterialTheme.colorScheme.onPrimary,
         elevation = FloatingActionButtonDefaults.elevation(defaultElevation = EviloElevation.Floating),
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            EviloContentTransition(targetState = kind, label = "content-type-icon") {
-                Icon(EviloIcons.kind(it), null, Modifier.size(EviloLayout.IconSize))
-            }
-            Icon(EviloIcons.Down, null, Modifier.size(EviloLayout.ContentSelectorChevronSize))
+        // Icon crossfades stay transparent; page transitions paint an opaque surface.
+        Crossfade(targetState = kind, modifier = Modifier.size(EviloLayout.IconSize),
+            animationSpec = EviloMotion.componentSpec(), label = "content-type-icon") {
+            Icon(EviloIcons.kind(it), null, Modifier.size(EviloLayout.IconSize))
         }
     }
+}
+
+internal fun contentSelectorMorphTarget(kind: MediaKind): Float = when (kind) {
+    MediaKind.MANGA -> 0f
+    MediaKind.NOVEL -> 1f / 3f
+    MediaKind.ANIME -> 2f / 3f
+    MediaKind.FILM -> 1f
+}
+
+private class ContentSelectorMorph(initial: Float) {
+    val animation = Animatable(initial)
+    val shape: Shape = EviloContentSelectorShape { animation.value }
+}
+
+@Composable
+private fun rememberContentSelectorMorph(kind: MediaKind): ContentSelectorMorph {
+    val target = contentSelectorMorphTarget(kind)
+    val morph = remember { ContentSelectorMorph(target) }
+    val pageActive = LocalEviloPageActive.current
+    val focused = LocalWindowInfo.current.isWindowFocused
+    LaunchedEffect(target, pageActive, focused) {
+        if (!pageActive) morph.animation.snapTo(target)
+        else if (focused) morph.animation.animateTo(target, EviloMotion.spatialSpec())
+        // A modal sheet owns focus while hiding. Keep the old outline until this
+        // window regains focus, then animate rather than snapping under the sheet.
+    }
+    // The FAB outline and dock draw cache read this same value without recomposing
+    // page data. There is no independent idle cycle delaying selection feedback.
+    return morph
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -164,8 +239,13 @@ private fun ContentTypeButton(kind: MediaKind, onClick: () -> Unit, modifier: Mo
 internal fun ContentTypeSheet(state: PluginRepositoryState, installedCounts: Map<MediaKind, Int>, enabled: Boolean,
     onDismiss: () -> Unit, onSelect: (MediaKind) -> Unit) {
     val colors = MaterialTheme.colorScheme
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = colors.surface,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), sheetMaxWidth = EviloLayout.SheetMaxWidth) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scope = rememberCoroutineScope()
+    var pendingKind by remember { mutableStateOf<MediaKind?>(null) }
+    val select by rememberUpdatedState(onSelect)
+    val selectionEnabled by rememberUpdatedState(enabled)
+    ModalBottomSheet(onDismissRequest = { if (pendingKind == null) onDismiss() }, containerColor = colors.surface,
+        sheetState = sheetState, sheetMaxWidth = EviloLayout.SheetMaxWidth) {
         Column(
             Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
                 .padding(start = EviloSpacing.ExtraLarge, end = EviloSpacing.ExtraLarge, bottom = EviloSpacing.Section),
@@ -188,8 +268,22 @@ internal fun ContentTypeSheet(state: PluginRepositoryState, installedCounts: Map
                         val outline by animateColorAsState(if (active) colors.primary else colors.outlineVariant,
                             EviloMotion.componentSpec(), label = "kind-outline")
                         Surface(
-                            onClick = { onSelect(kind) },
-                            enabled = enabled,
+                            onClick = {
+                                if (selectionEnabled && pendingKind == null) {
+                                    pendingKind = kind
+                                    scope.launch {
+                                        try {
+                                            sheetState.hide()
+                                            if (!sheetState.isVisible) {
+                                                if (selectionEnabled) select(kind) else onDismiss()
+                                            }
+                                        } finally {
+                                            pendingKind = null
+                                        }
+                                    }
+                                }
+                            },
+                            enabled = enabled && pendingKind == null,
                             modifier = Modifier.weight(1f).semantics { selected = active },
                             shape = MaterialTheme.shapes.large,
                             color = container,

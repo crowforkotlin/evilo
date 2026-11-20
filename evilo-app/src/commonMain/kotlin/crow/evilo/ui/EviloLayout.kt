@@ -44,12 +44,19 @@ object EviloLayout {
     val BorderWidth = 1.dp
     val RailWidth = 96.dp
     val ContentSelectorSize = 64.dp
-    val ContentSelectorChevronSize = 12.dp
     val ContentChoiceMinHeight = 128.dp
     val NavigationCenterSlot = 88.dp
     val NavigationOverlap = 24.dp
-    val NavigationLabelOffset = 72.dp
+    val NavigationFabClearance = 8.dp
+    val NavigationShoulderRadius = 12.dp
+    val NavigationLabelOffset = ContentSelectorSize + NavigationFabClearance + EviloSpacing.Small
     val PermissionContentMaxHeight = 440.dp
     val SheetMaxWidth = 640.dp
     val ToastMaxWidth = 480.dp
+    val PageStateMaxWidth = 480.dp
+    val LoadingIndicatorSize = 64.dp
+    val InlineLoadingIndicatorSize = 48.dp
+    val PageStateIconSize = 32.dp
+    val LoadingStateMinHeight = 224.dp
+    val RetryStateMinHeight = 256.dp
 }

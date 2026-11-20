@@ -13,6 +13,7 @@ import coil3.request.CachePolicy
 import coil3.request.ImageRequest
 import coil3.request.ImageResult
 import coil3.request.SuccessResult
+import coil3.request.crossfade
 import coil3.request.maxBitmapSize
 import coil3.size.Size
 import crow.evilo.feature.reader.MediaSourceSession
@@ -84,6 +85,8 @@ internal class EviloImages(
 
     internal fun request(data: EviloImageData, naturalSize: Boolean = false): ImageRequest = ImageRequest.Builder(context)
         .data(data)
+        // EviloAsyncImage owns the cover-only fade; Coil must not also fade icons or reader pages.
+        .crossfade(false)
         .diskCachePolicy(CachePolicy.DISABLED)
         .memoryCachePolicy(if (data.attempt > 0) CachePolicy.WRITE_ONLY else CachePolicy.ENABLED)
         .maxBitmapSize(Size(data.limits.maxDimension, data.limits.maxDimension))

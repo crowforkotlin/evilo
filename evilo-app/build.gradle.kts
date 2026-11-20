@@ -61,6 +61,10 @@ kotlin {
         jvmMain.dependencies {
             implementation(libs.androidx.sqlite.bundled)
         }
+        jvmTest.dependencies {
+            // Dock/cover geometry tests build real Skia paths, which need the host runtime.
+            implementation(compose.desktop.currentOs)
+        }
         iosMain.dependencies {
             implementation(libs.androidx.sqlite.bundled)
         }

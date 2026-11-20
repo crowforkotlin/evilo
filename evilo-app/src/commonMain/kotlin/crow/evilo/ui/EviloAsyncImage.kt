@@ -20,22 +20,27 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.MotionDurationScale
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import coil3.ImageLoader
 import coil3.compose.AsyncImage
 import coil3.compose.AsyncImagePainter
+import coil3.compose.CrossfadePainter
+import coil3.decode.DataSource
 import coil3.request.ImageRequest
 import crow.evilo.app.resources.*
 import crow.evilo.feature.reader.ImageFailure
 import crow.evilo.feature.reader.ImageFailureKind
 import crow.evilo.feature.reader.imageFailure
 import org.jetbrains.compose.resources.stringResource
+import kotlin.time.Duration.Companion.milliseconds
 
 internal enum class ImagePresentation { ICON, COVER, PAGE }
 
@@ -57,6 +62,24 @@ internal fun EviloAsyncImage(
 ) {
     var state by remember(request, loader) { mutableStateOf<AsyncImagePainter.State>(AsyncImagePainter.State.Empty) }
     var showDetails by remember(request, loader) { mutableStateOf(false) }
+    val motionDurationScale = rememberCoroutineScope().coroutineContext[MotionDurationScale]
+    val transform: (AsyncImagePainter.State) -> AsyncImagePainter.State = remember(presentation, contentScale, motionDurationScale) {
+        { next ->
+            val scale = motionDurationScale?.scaleFactor ?: 1f
+            // Fade only approved, newly loaded covers. Cached covers stay opaque for shared elements.
+            // Coil's CrossfadePainter uses wall-clock time, so apply Compose's duration scale here.
+            if (presentation == ImagePresentation.COVER && next is AsyncImagePainter.State.Success &&
+                next.result.dataSource != DataSource.MEMORY_CACHE && scale > 0f) {
+                next.copy(painter = CrossfadePainter(
+                    start = null,
+                    end = next.painter,
+                    contentScale = contentScale,
+                    duration = (EviloMotion.ComponentDurationMillis * scale).toInt().coerceAtLeast(1).milliseconds,
+                    preferEndFirstIntrinsicSize = true,
+                ))
+            } else next
+        }
+    }
     val error = (state as? AsyncImagePainter.State.Error)?.result?.throwable
     val failure = remember(error, address) { error?.let { imageFailure(it, address) } }
     val failureCallback by rememberUpdatedState(onFailure)
@@ -74,7 +97,7 @@ internal fun EviloAsyncImage(
         if (image == null) stateDescription = status
     }, contentAlignment = Alignment.Center) {
         if (request != null) AsyncImage(model = request, contentDescription = description, imageLoader = loader,
-            modifier = Modifier.fillMaxSize(), contentScale = contentScale, onState = { state = it })
+            modifier = Modifier.fillMaxSize(), contentScale = contentScale, transform = transform, onState = { state = it })
         if (image == null) {
             if (placeholder != null) placeholder()
             else Column(Modifier.padding(EviloSpacing.Medium), horizontalAlignment = Alignment.CenterHorizontally,

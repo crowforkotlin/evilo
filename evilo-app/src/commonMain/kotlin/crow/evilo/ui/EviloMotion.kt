@@ -2,6 +2,7 @@ package crow.evilo.ui
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.CubicBezierEasing
@@ -70,6 +71,7 @@ internal object EviloMotion {
 }
 
 internal val LocalEviloPageActive = compositionLocalOf { true }
+internal val LocalEviloAnimatedVisibilityScope = compositionLocalOf<AnimatedVisibilityScope?> { null }
 
 @Composable
 internal fun <T> EviloPageTransition(
@@ -129,7 +131,7 @@ internal fun <T> EviloPageTransition(
     ) { payload ->
         val displayed = payload.value
         val active = parentActive && !previewing && contentKey(displayed) == contentKey(targetState)
-        CompositionLocalProvider(LocalEviloPageActive provides active) {
+        CompositionLocalProvider(LocalEviloPageActive provides active, LocalEviloAnimatedVisibilityScope provides this) {
             val density = LocalDensity.current.density
             val surface = MaterialTheme.colorScheme.background
             val moving = previewing && backState?.outgoing?.let(contentKey) == contentKey(displayed)

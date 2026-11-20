@@ -286,7 +286,10 @@
     <string name="source_catalog_failed">作品目录加载失败</string>
     <string name="source_details_failed">作品详情加载失败</string>
     <string name="source_content_failed">章节内容加载失败</string>
-    <string name="source_load_failed_hint">可重试加载当前内容。</string>
+    <string name="source_load_failed_hint">内容未能加载，点击重新加载再试一次。</string>
+    <string name="source_loading_content">正在加载内容…</string>
+    <string name="source_catalog_retry_hint">向下拉动刷新，或点击重新加载再试一次。</string>
+    <string name="source_reload">重新加载</string>
     <string name="image_invalid_address">图片地址无效</string>
     <string name="image_missing_icon">插件未提供图标</string>
     <string name="image_icon_details">查看图标错误详情</string>

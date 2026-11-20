@@ -165,7 +165,28 @@ state, separate from the publisher's catalog date; no Room column was added.
 
 Compose's saveable state holders retain owning-page list/grid positions and local
 input. Media details/back keep catalog results in `MediaBrowserController` rather
-than executing another search. Media-route state belongs to its session; closing
+than executing another search. `HomePage.PluginBrowser` mounts `MediaBrowserRoute`
+immediately, even before a verified session exists. The route displays the approved
+plugin name/version, disabled search, and an in-page Material3 loading indicator
+with the stable "Loading content…" label. Package phases remain available in the
+load diagnostics without changing this label.
+A nullable session gates controller/image-scope creation; it never permits content
+execution before signed loading and installation acceptance. Session arrival changes
+content without changing the home/media catalog route key or replacing the app bar.
+State collection is keyed to the controller and image scope, so a new scope starts
+from its own current connection value rather than briefly reusing the absent
+session's disconnected value. Genuine scope closure still shows Reopen.
+Loading failures remain on that page with a centered Reload action; connected
+catalogs additionally support pull-to-refresh. Catalog operations choose exactly
+one indicator location (center, pagination footer, or pull-refresh top); failures
+remove loading immediately, and the home progress bar stays hidden on this route.
+`SharedTransitionLayout` surrounds the media page transition; its page visibility
+scope connects catalog/detail cover bounds. Sharing matches image scope, media ID,
+and URL, and is disabled during predictive previews to retain full-page geometry.
+The image still loads through the approved Coil request path; cached covers avoid
+another fade. First results and reader responses fade in once; keyed lazy-item
+animations handle pagination and chapter arrival without replaying during scroll.
+Media-route state belongs to its session; closing
 the browser removes its saved page state so a newly opened empty-query catalog
 cannot restore text/results from an old session. App Bar/system/Escape return handling closes the
 current confirmation or nested reader page before leaving the works session.

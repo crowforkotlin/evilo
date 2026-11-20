@@ -43,7 +43,6 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBarDefaults
 import androidx.compose.material3.RadioButton
@@ -59,7 +58,6 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -149,8 +147,8 @@ private fun PluginHomeScreen(state: PluginHomeState, images: EviloImages, host: 
     val installedMessage = stringResource(Res.string.plugin_installed_notice)
     val browseAction = stringResource(Res.string.plugin_browse)
     val searchLabels = browseSearchLabels()
-    LaunchedEffect(homePageKey(state), active, backTransition.previewing) {
-        if (active == null && !backTransition.previewing) {
+    LaunchedEffect(homePageKey(state), backTransition.previewing) {
+        if (page !is HomePage.PluginBrowser && !backTransition.previewing) {
             focusManager.clearFocus(force = true)
             keyboard?.hide()
             focus.requestFocus()
@@ -198,7 +196,7 @@ private fun PluginHomeScreen(state: PluginHomeState, images: EviloImages, host: 
                 topBar = {
                     // Keep system insets even when the animated app-bar content has zero height.
                     Box(Modifier.fillMaxWidth().windowInsetsPadding(TopAppBarDefaults.windowInsets)) {
-                        EviloBarTransition(active == null) {
+                        EviloBarTransition(page !is HomePage.PluginBrowser) {
                             HomeAppBar(state, dispatch)
                         }
                     }
@@ -256,24 +254,22 @@ private fun PluginHomeScreen(state: PluginHomeState, images: EviloImages, host: 
                                     HomePage.Safety -> AppSafetyScreen()
                                     HomePage.About -> AppAboutScreen(host)
                                     is HomePage.PluginBrowser -> {
-                                        DisposableEffect(displayedPage) { onDispose { savedPages.removeState(displayedPage.toString()) } }
-                                        EviloContentTransition(displayed, Modifier.fillMaxSize(), contentKey = {
-                                            it.connection.active?.takeIf { connection -> connection.installationKey == displayedPage.key }?.session
-                                        }, label = "plugin-connection") { browserState ->
-                                            val connection = browserState.connection.active?.takeIf { it.installationKey == displayedPage.key }
-                                            if (connection != null) key(connection.session) {
-                                                MediaBrowserRoute(connection.session, browserState.catalog.selectedKind,
-                                                    onClose = { dispatch(PluginHomeIntent.ClosePlugin) },
-                                                    onReopen = { dispatch(PluginHomeIntent.OpenPlugin(displayedPage.key, rememberSource = false)) },
-                                                    onPluginDetails = { dispatch(PluginHomeIntent.ManagePlugin(displayedPage.key)) },
-                                                    loadTimings = browserState.connection.loadTimings)
-                                            } else PluginLoadingScreen(browserState, displayedPage.key, dispatch)
-                                        }
+                                        val installation = displayed.catalog.installed.firstOrNull { it.key == displayedPage.key }
+                                        val entry = displayed.entries[displayedPage.key]
+                                        MediaBrowserRoute(active?.session, displayed.catalog.selectedKind,
+                                            onClose = { dispatch(PluginHomeIntent.ClosePlugin) },
+                                            onReopen = { dispatch(PluginHomeIntent.OpenPlugin(displayedPage.key, rememberSource = false)) },
+                                            onPluginDetails = { dispatch(PluginHomeIntent.ManagePlugin(displayedPage.key)) },
+                                            pluginName = installation?.plugin?.name ?: entry?.plugin?.name.orEmpty(),
+                                            pluginVersion = installation?.release?.version ?: entry?.installation?.release?.version.orEmpty(),
+                                            connecting = displayed.connection.busy || (active == null && displayed.connection.error == null),
+                                            connectionError = displayed.connection.error,
+                                            loadTimings = displayed.connection.loadTimings)
                                     }
                                 }
                             }
                         }
-                    EviloProgressIndicator(active == null && !state.connection.busy && (state.changing || state.catalog.refreshing),
+                    EviloProgressIndicator(page !is HomePage.PluginBrowser && active == null && !state.connection.busy && (state.changing || state.catalog.refreshing),
                         Modifier.align(Alignment.TopCenter).widthIn(max = EviloLayout.ContentMaxWidth).fillMaxWidth())
                     Box(Modifier.fillMaxSize()) { EviloToastHost(toasts, expanded) }
                 }
@@ -537,23 +533,6 @@ internal fun PluginAvatar(name: String, url: String, allowHttp: Boolean, images:
     EviloAsyncImage(request, images.loader, name, Modifier.size(EviloLayout.AvatarSize).clip(MaterialTheme.shapes.medium), contentScale = ContentScale.Fit,
         placeholder = { Text(name.take(1).uppercase(), style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.primary) },
         presentation = ImagePresentation.ICON, address = url, onFailure = onFailure)
-}
-
-@Composable
-private fun PluginLoadingScreen(state: PluginHomeState, key: String, dispatch: (PluginHomeIntent) -> Unit) {
-    val loading = state.connection.busy
-    val message = if (loading) pluginLoadPhaseLabel(state.connection.phase) else state.connection.error ?: stringResource(Res.string.plugin_session_closed)
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(EviloLayout.PagePadding),
-        verticalArrangement = Arrangement.spacedBy(EviloSpacing.Large, Alignment.CenterVertically)) {
-        if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
-        Text(message, style = MaterialTheme.typography.bodyMedium, color = if (loading) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error)
-        PluginLoadDiagnostics(state.connection.loadTimings)
-        if (!loading) {
-            Button(onClick = { dispatch(PluginHomeIntent.OpenPlugin(key, rememberSource = false)) }) { Text(stringResource(Res.string.source_retry)) }
-            TextButton(onClick = { dispatch(PluginHomeIntent.ManagePlugin(key)) }) { Text(stringResource(Res.string.plugin_details)) }
-        }
-        TextButton(onClick = { dispatch(PluginHomeIntent.ClosePlugin) }) { Text(stringResource(if (loading) Res.string.home_cancel else Res.string.source_back)) }
-    }
 }
 
 @Composable

@@ -286,7 +286,10 @@
     <string name="source_catalog_failed">Works catalog failed to load</string>
     <string name="source_details_failed">Work details failed to load</string>
     <string name="source_content_failed">Chapter content failed to load</string>
-    <string name="source_load_failed_hint">Retry to load this content again.</string>
+    <string name="source_load_failed_hint">This content could not be loaded. Tap Reload to try again.</string>
+    <string name="source_loading_content">Loading content…</string>
+    <string name="source_catalog_retry_hint">Pull down to refresh, or tap Reload to try again.</string>
+    <string name="source_reload">Reload</string>
     <string name="image_invalid_address">Invalid image address</string>
     <string name="image_missing_icon">No plugin icon provided</string>
     <string name="image_icon_details">View icon error details</string>

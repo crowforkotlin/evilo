@@ -153,10 +153,10 @@ spacing scales.
 | Medium shape, 16 | Media cards, chapter rows, settings groups, source input |
 | Large shape, 24 | Plugin cards, grouped settings, empty states, selector choices |
 | Extra-large shape, 28 | Material dialogs and sheet top corners |
-| Pill/circle | Search fields, content-selector FAB, standard Material buttons |
+| Pill/circle | Search fields and standard Material buttons; content selector uses a bounded four-to-six-lobed morph |
 | Outline | 1, using `outlineVariant`; selected choices use `primary` |
 | Elevation | Flat cards at 0; content-selector FAB at 6 |
-| Icons | 24 viewport/action size, 18 inline size, 12 selector chevron; 2.2 stroke, rounded caps/joins, curved arrow and angular-icon corners |
+| Icons | 24 viewport/action size, 18 inline size; 2.2 stroke, rounded caps/joins, curved arrow and angular-icon corners; selector has no secondary chevron |
 | Plugin avatar | 48 with medium rounded shape |
 | Plugin row action | One 48-touch-target Info action in a 16-radius container; no separate trailing chevron |
 | Minimum touch target | 48; use Material controls and adequately padded rows |
@@ -168,14 +168,31 @@ semantics.
 
 ## Navigation and responsive layout
 
-- Below 600 wide, use a Material `NavigationBar` with Browse and More. Reserve an
-  88-wide center slot for the 64-diameter circular content-selector FAB, raised
-  24 above the bar. The current media type has a bounded label below the FAB.
+- Below 600 wide, use Material `NavigationBarItem`s with Browse and More over a
+  full-width, bottom-inset-painted surface. Reserve an 88-wide center slot for the
+  64dp content-selector FAB, raised 24 above the bar. The bar has a transparent
+  concave notch following the animated FAB contour, with 12dp rounded shoulders
+  and at least 8dp clearance (plus conservative sampling slack). The background must not
+  paint behind the button. The current media type sits below the notch at 80dp
+  from the dock top. Each media type has a distinct four-to-six-lobed outline;
+  changing the selection morphs directly to that outline over 320ms. The FAB and
+  notch read the same animation value in outline/draw phases, not page models.
+  There is no independent idle animation; inactive navigation snaps to the selected
+  outline, while unfocused navigation waits until focus returns before animating.
+  Compose respects zero motion-duration scale.
+  The centered icon crossfades over 220ms on a transparent background, without a
+  secondary arrow or icon rotation. Keep the selector an action, not an
+  indeterminate progress semantic. Scroll
+  auto-hide is not implemented; existing keyboard/secondary-page hiding remains.
 - At 600 or wider, use a 96-wide `NavigationRail` with the same destinations and
   selector. The rail can scroll in short windows.
 - The selector opens one fully expanded bottom sheet, at most 640 wide, with a
   scrollable two-by-two set of manga, novel, anime, and film/TV choices. Each has
   an icon, visible installed-plugin count after source/NSFW filtering, and an explicit selected state.
+  Selection disables repeated taps and waits for `SheetState.hide()` to finish
+  before dispatching the selected kind. Keep the sheet composed during dismissal;
+  do not remove the overlay early or add a fixed delay. The FAB starts changing
+  after the underlying window regains focus.
 - Main content is centered and capped at 1200. Reading and work details are
   capped at 900. Page padding is based on the remaining content width, not the
   platform name.
@@ -216,9 +233,16 @@ History, Updates, or Downloads items merely to fill four navigation slots.
   details, and raw installation management have their own returnable pages.
 - Use grouped settings with a heading, icon, title, description, and one trailing
   control. A switch row includes its text in the clickable/toggleable area.
-- Use the shared empty-state card with a real next action. Distinguish no
-  installations, sources added without installation, disabled sources, unsupported
-  media kind, search/source misses, and NSFW-hidden entries without exposing names.
+- Empty states and recoverable page failures use centered content on the open page
+  surface, not a bordered card. `EviloEmptyState` uses a primary-container icon;
+  `EviloRetryState` uses an error-container retry emblem, centered title/hint, and
+  a labeled Reload button. Keep content width at most 480dp and allow scrolling
+  for short windows/large text. Distinguish no installations, sources added without
+  installation, disabled sources, unsupported media kind, search/source misses,
+  and NSFW-hidden entries without exposing names. Actual content/settings retain cards.
+  Catalog failures also support pull-to-refresh with Material's expressive loading
+  indicator; chapter/detail failures retain explicit reload. Do not replace a failure
+  with an empty successful result, or hide retry just because a toast disappears.
 - Plugin details contain scrollable identity, installation, source-copy, version,
   installed release metadata, and actual-source sections. Bottom actions stay
   separate from scrolling content. Browse is the action for an unchanged usable
@@ -236,7 +260,17 @@ History, Updates, or Downloads items merely to fill four navigation slots.
   Reader -> work details -> works catalog -> previous home page. Local query/filter
   state and saveable grid/list positions survive returning to their owning page.
 - Missing icons use initials; missing covers use a neutral image outline and label.
-  Loading covers retain their fixed 2:3 box without a large spinner. Cover errors
+  Loading covers retain their fixed 2:3 box without a large spinner. Newly loaded
+  covers use Coil's `CrossfadePainter` for a 220ms fade; memory-cache hits stay
+  opaque. Apply Compose's duration scale; zero disables the fade. Reader pages
+  and icons do not inherit the cover fade.
+  Catalog/detail covers share bounds over 320ms using the same image-scope,
+  media-ID, and URL key. Both endpoints have 2:3 bounds with rounded clipping in
+  the transition overlay; keep the image approved through the normal Coil path.
+  Placeholder/error differences crossfade inside those bounds. Changed URLs or
+  missing/offscreen counterparts fall back to ordinary page/image transitions.
+  Disable cover sharing during predictive previews so it does not detach a cover
+  from the complete page being transformed by the gesture. Cover errors
   show a compact category and individual actions, with Details retaining retry
   when two 48 targets do not fit. Reader errors retain page numbers and separate
   retry/reopen actions. Original exception text never appears on covers.
@@ -299,10 +333,26 @@ History, Updates, or Downloads items merely to fill four navigation slots.
 - Media-type/source-filter content, app-bar titles, selector icons, search-clear
   actions, progress visibility, selection colors, and changing footer
   sizes use shared component specs. Progress indicators overlay the content edge,
-  rather than inserting a row that moves the page. Do not add decorative entrance
-  motion to every row or badge. Plugin installation/opening uses the detail footer
-  or plugin-loading page for progress and phase labels; suppress the global progress
-  bar during these operations, even if a source refresh is also running.
+  rather than inserting a row that moves the page. A newly populated media grid
+  fades in over 220ms; restored results and ordinary scrolling do not replay it.
+  Media cards and chapter rows use keyed lazy-item appearance/placement animation
+  for appended results. Reader content fades in once when its response arrives.
+  Do not add staggered delays or decorative entrance motion to every badge.
+  Installation keeps progress in the detail footer.
+  Opening mounts the works route immediately with its title, version, Back/Close,
+  and disabled search, while `EviloLoadingState` shows Material3 `LoadingIndicator`
+  inside the content area with the stable localized label "Loading content…".
+  Package phase details remain in diagnostics, not rapidly changing page text.
+  Keep the same route/title when the session arrives;
+  do not crossfade a separate loading page or animate another app-bar replacement.
+  Initial catalog, chapter/details, and pagination loads use expressive indicators;
+  preserve surrounding content. Each catalog operation chooses one presentation:
+  center for an initial/search load, footer for pagination, or top for pull-refresh.
+  The top pull indicator is mounted only during a gesture or pull-refresh, not
+  alongside center/footer loading. A failed request removes all indeterminate
+  indicators immediately, including the brief error-before-busy-clears state.
+  Suppress the global progress bar throughout the plugin-browser route, including
+  package failures, even if an unrelated source refresh is also running.
   Compose specs respect a supplied motion-duration scale; the HTML loading spinner
   stops when the browser requests reduced motion.
 

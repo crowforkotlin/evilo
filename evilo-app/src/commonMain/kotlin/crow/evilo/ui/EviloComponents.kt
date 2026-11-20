@@ -8,6 +8,8 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -31,6 +33,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import crow.evilo.app.resources.Res
 import crow.evilo.app.resources.home_clear_search
 import org.jetbrains.compose.resources.stringResource
@@ -97,21 +100,17 @@ internal fun EviloEmptyState(
     modifier: Modifier = Modifier,
     action: @Composable () -> Unit,
 ) {
-    Surface(
-        modifier = modifier,
-        shape = MaterialTheme.shapes.large,
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(EviloLayout.BorderWidth, MaterialTheme.colorScheme.outlineVariant),
-    ) {
-        Column(Modifier.fillMaxWidth().padding(EviloSpacing.ExtraLarge),
-            verticalArrangement = Arrangement.spacedBy(EviloSpacing.Large)) {
-            Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.primaryContainer) {
-                Icon(icon, null, Modifier.padding(EviloSpacing.Medium).size(EviloLayout.IconSize),
+    Box(modifier.fillMaxWidth().padding(EviloSpacing.ExtraLarge), contentAlignment = Alignment.Center) {
+        Column(Modifier.widthIn(max = EviloLayout.PageStateMaxWidth).fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(EviloSpacing.Large)) {
+            Surface(shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.primaryContainer) {
+                Icon(icon, null, Modifier.padding(EviloSpacing.Large).size(EviloLayout.IconSize),
                     tint = MaterialTheme.colorScheme.onPrimaryContainer)
             }
-            Column(verticalArrangement = Arrangement.spacedBy(EviloSpacing.Small)) {
-                Text(title, style = MaterialTheme.typography.titleLarge)
-                Text(description, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(EviloSpacing.Small)) {
+                Text(title, style = MaterialTheme.typography.titleLarge, textAlign = TextAlign.Center)
+                Text(description, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center)
             }
             action()
         }
