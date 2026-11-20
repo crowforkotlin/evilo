@@ -44,15 +44,18 @@ isolated `koinApplication`; `KoinIsolatedContext` exposes it to Compose. Do not
 call global `startKoin()` from platform launchers or pages.
 
 `eviloCoreModule()` supplies the host descriptor, app-controlled trusted keys,
-typed DataStore, catalog DAO, one Ktor client/transport, preferences repository,
+typed DataStore, catalog DAO, host-only signed-manifest cache DAO, one Ktor client/transport, preferences repository,
 catalog repository, session factory, connection controller, and home store.
 `eviloUiModule()` supplies one `EviloImages` instance and Coil loader.
 `MediaBrowserController` is a Koin factory parameterized by session and media
 kind, not an application singleton.
 
 Initialization loads Room records, retries pending plugin-data deletions, reads
-preferences, and initializes the bundled plugin catalog. Non-preview startup
-then dispatches `PluginHomeIntent.Refresh`. Compose previews use explicit memory
+preferences, and restores only stored subscriptions, cached catalogs, and
+installations. Fresh storage has zero sources and plugins; startup never adds a
+default source or catalog. Non-preview startup then dispatches
+`PluginHomeIntent.Refresh`, which fetches only enabled stored sources and makes no
+requests when there are none. Compose previews use explicit memory
 stores; production startup never silently switches to them after an error.
 Startup failures show their message and a retry action.
 
@@ -118,11 +121,14 @@ Local unsubmitted form text and version selection may remain Compose state.
   Shared `EviloPredictiveBackHandler` retains progress, swipe edge, and vertical
   touch movement in portable `EviloBackEvent` values. It mounts a previous page
   through `SeekableTransitionState`, keeps both pages alive, and transforms the
-  full outgoing page with Flutter-style predictive geometry, separately from the
-  ordinary page slide/fade. It does not dispatch
-  intents while swiping; cancellation restores the page and completion commits
-  Back only if the navigation key still matches. Catalog Back delegates to the
-  home handler, and the root does not intercept system exit.
+  full outgoing page with gesture-following geometry, separately from the ordinary
+  page slide/fade. Identity-hashed payload holders keep catalogue contents out of
+  animation map hashing; same-route updates change their observable content without
+  starting another transition. Commit keeps the preview mounted until the route
+  observes the navigation change and reuses the preview destination payload.
+  It does not dispatch intents while swiping; cancellation restores the page and
+  completion commits Back only if the navigation key still matches. Catalog Back
+  delegates to the home handler, and the root does not intercept system exit.
 - `LatestOperation` cancels obsolete jobs and waits for their operation mutex
   before replacements execute. Generation checks prevent old failure/finalization
   callbacks from changing the new operation's state. Explicit `cancel()` preserves
@@ -249,11 +255,14 @@ deletions. Version codes are indexed as decimal text because the current SQLite
 Web driver transports numbers through JavaScript doubles; installation JSON is
 checked against its indexed identity and version.
 
-`PluginCatalogRepository.initialize()` renames the previous built-in source to
-`bundled` and updates its default URL, cache key/display metadata, installation
-source fields, and scoped floor keys within the existing Room records. The
-installation release/time, disabled state, and plugin KV are retained. This is
-not a migration from the removed JSON/localStorage storage implementations.
+`PluginCatalogRepository.initialize()` retains existing sources and installations.
+Only stored historical `official` records are migrated to the `bundled` source ID
+and its successor URL, cache key, installation source fields, and scoped floor keys.
+Cached catalog metadata, installation release/time, disabled state, and plugin KV
+are retained. Historical automatically subscribed sources are ordinary removable
+sources; removing one never causes startup to add it again. No subscription or
+catalog is seeded. This is not a migration from the removed JSON/localStorage
+storage implementations.
 
 `PluginCatalogRepository` validates catalog/release metadata before mutations.
 Room writes complete before new repository state is published. Once a mutation's

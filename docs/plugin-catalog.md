@@ -2,8 +2,10 @@
 
 ## Host your own plugin source
 
-A plugin source is a JSON document hosted by its publisher. No pull request to
-evilo, registration with the bundled source, or particular filename is required.
+A plugin source is a JSON document hosted by its publisher. Evilo supplies no
+default source or plugin: a fresh app has no subscriptions, and restart never
+recreates a removed source. Users add source URLs explicitly. No pull request to
+evilo, source registration, or particular filename is required.
 
 1. Create a catalog using the compact example below. The root only requires
    `name` and `plugins`; `{"name":"My plugins","plugins":[]}` is a valid empty source.
@@ -26,7 +28,7 @@ verification key; third-party publishers keep their own private key and publish
 `signing` and `manifestSha256` on each release. A catalog declaration is not trust:
 users explicitly approve the publisher fingerprint and exact version before
 execution. No PR adding a publisher key to evilo is required. Catalog
-inclusion, including in the bundled source, is not a safety review.
+inclusion is not a safety review.
 
 ```json
 "signing": {"algorithm": "Ed25519", "keyId": "publisher-example", "publicKeyHex": "<64 lowercase hexadecimal characters>"},
@@ -86,13 +88,28 @@ Two checks run before any plugin is listed:
 
 A host that swaps the index, the signature, or the public key therefore fails
 unless it also controls the fingerprint the user subscribed to. One thousand
-repositories cost two requests: the pointer and the index.
+repositories cost four requests: the pointer, index, signature and public key.
 
 Each index entry records the plugin's own `catalogUrl` and the plugin object a
 catalog would publish, narrowed to its newest release. The list renders from that
 object, and installation works from it too, so a subscriber does not fetch every
 plugin catalog first. Older versions stay in the plugin's own catalog, which
 remains authoritative for its full release history.
+
+### Local development on Android
+
+`127.0.0.1` in any document points to the phone, not the computer serving it.
+For LAN access, publish an `indexUrl` using the computer's reachable LAN address;
+serve the matching `.sig` and `.pub` files there too. Any plugin download URLs
+inside the signed index must also be reachable from the phone. Changing the
+index bytes requires regenerating its signature; changing only the pointer's
+`indexUrl` does not.
+
+Alternatively, keep computer-local URLs and run `adb reverse tcp:8080 tcp:8080`
+for a server on port 8080. Add the pointer using `http://127.0.0.1:8080/repo.json`.
+The app does not rewrite declared hosts. Enable HTTP source consent for either
+HTTP development setup, and allow the Android local network permission when
+prompted for LAN access.
 
 ### Publishing a subscription
 
@@ -167,9 +184,11 @@ review, and signed descriptor checks still apply.
 
 Each third-party version requires a new explicit approval. A changed signing key
 is a publisher change, not a transparent update. Installed loads use their recorded
-verification identity and signed-manifest digest; changing the remote bytes is
-rejected even when the same publisher signs them. Publishers must issue a new
-version/code for changed code. Legacy installations without a pinned digest require
+verification identity and signed-manifest digest. Opens prefer cached signed bytes,
+still rechecking their signature and digest. A missing cache fetches again; changed
+remote bytes are rejected even when the same publisher signs them. Cached opens do
+not poll for remote replacements. Publishers must issue a new version/code for
+changed code. Legacy installations without a pinned digest require
 one explicit reinstall; original timestamps are retained for the unchanged release.
 No global third-party key whitelist or unsigned loading path is introduced.
 
@@ -276,8 +295,9 @@ describes what the host implements, not a per-plugin grant.
 The repository recommends the highest usable, compatible release for the selected
 content type. It never falls back below a known mandatory floor. Version floors
 are persisted and cannot be lowered by a later catalog refresh. Every source's
-floor is scoped to that subscription, including the built-in source; it cannot
-block another source's copy of the same signed plugin ID. Disabling a source
-retains its floors. The built-in subscription can be disabled, not removed.
-Removing a custom source removes its scoped floor, cache, and installations;
-plugin data is retained. Install/update still requires explicit release review.
+floor is scoped to that subscription; it cannot block another source's copy of
+the same signed plugin ID. Disabling a source retains its floors. Every source
+can be removed, including historical automatically subscribed sources retained
+from earlier app versions. Removing a source removes its scoped floor, cache, and
+installations; plugin data is retained. Install/update still requires explicit
+release review.

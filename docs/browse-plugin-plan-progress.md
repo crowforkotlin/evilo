@@ -5,7 +5,8 @@ Date: 2026-11-11
 This ledger follows the external `PLAN.md` dated 2026-11-11. It records the
 current working-tree implementation, not a released application or a passed test
 report. Existing catalog-format, configuration, documentation, and storage edits
-were retained. The bundled `plugin-repository/plugin.json` still has no plugins.
+were retained. Evilo now supplies no default source or plugin; the legacy
+`plugin-repository/plugin.json` is not bundled into the application.
 
 ## Evidence status
 
@@ -51,7 +52,7 @@ is source implementation present, validation not run unless explicitly stated.
 | Section 6.2: honest signed loading and cancel/replace | `PluginLoadPhase`, `PluginSessionConnector`, `PluginSessionFactory`, `LatestOperation` | `AppPluginControllerTest` covers phases, cancellation, descriptor mismatch, cleanup failure, reopening, preference commit, and replacement; no signed package was loaded |
 | Section 6.3: check updates without install or switch | `PluginCatalogRepository.refresh(sourceId)`, `SourceCheckState`, `SourceCheckStatus` | Repository independent-success/failure/cache tests; `PluginHomeStoreTest.localSearchFiltersAndNavigationRemainAvailableDuringACatalogRefresh` |
 | S-01: source-management entry and independent actions | `HomeAppBar`, `PluginSourcesScreen`, `AddPluginSourceScreen` | Add/download cancellation store test; pointer separation of card/switch/settings and saved form state unobserved |
-| S-02: source settings and explicit destructive effects | `PluginSourceSettingsScreen`, `SourceRemovalDialog`, repository source mutations | Repository disable/remove/KV/default-pinning tests; built-in source cannot be removed and the subscription limit remains 16 |
+| S-02: source settings and explicit destructive effects | `PluginSourceSettingsScreen`, `SourceRemovalDialog`, repository source mutations | Repository disable/remove/KV/default-pinning tests; all sources, including historical automatically subscribed sources, can be removed; the subscription limit remains 16 |
 | S-03: per-source All/Installed catalogs | `projectSourceCatalog`, `SourceCatalogScreen` | Projection tests cover installed-release kinds and uninstalled catalog entries; disabled sources remain viewable but blocked for use/install/update |
 | D-01: full detail and contextual actions | `PluginDetailScreen`, `PluginReleaseChoice`, `releaseActionLabel` | Store detail/review/return tests; version list, installed release metadata, errors and footer layout still need rendering observation |
 | D-02: accurate sources and per-copy uninstall | `PluginSourceCopy`, `PluginSourceLinks`, `PluginReleaseReviewDialog`, `PluginUninstallDialog` | Repository stale-release/last-uninstall tests; `PluginHomeStoreTest.approvalRejectsTheExactReviewedReleaseAfterItsMetadataChanges` |
@@ -62,7 +63,7 @@ is source implementation present, validation not run unless explicitly stated.
 | Sections 4/10: return stack, More and Settings | `HomePage`, `HomeOverlay`, `PluginHomeStore.back/push`, `SettingsScreen`, saveable state holders | Home store and reader return/cancellation tests; system Back/Escape, scroll restoration and focus still need UI observation |
 | Section 3: image states, retry and diagnostics | `ImageFailure`, `EviloAsyncImage`, `EviloImageErrorDetails`, `SessionImages`, `PluginImageDecoderFactory` | `ImageFailureTest`, image decoder tests, typed transport/policy tests and `EviloImagesTest`; real failure unconfirmed |
 | Section 11: existing MD3 visual rules | `EviloTheme`, `EviloLayout`, `PluginRow`, source/settings/detail pages | Teal, ChillRoundM, shape/spacing/breakpoint tokens retained; all visual/accessibility acceptance unobserved |
-| Section 12.3: persistence and safety compatibility | `EviloPreferencesCodec`, repository commit/cleanup/default methods, approved image models | Legacy four-field Protobuf and repository migration/cancellation/floor/KV tests; no Room schema change or SDK bridge change |
+| Section 12.3: persistence and safety compatibility | `EviloPreferencesCodec`, repository commit/cleanup/default methods, approved image models | Legacy four-field Protobuf and repository migration/cancellation/floor/KV tests; additive Room v2 signed-manifest cache migration; no SDK bridge change |
 
 ## Acceptance scenarios
 
@@ -70,7 +71,7 @@ These are traceable checks to perform, not success results.
 
 | Scenario from PLAN section 14 | Source/test coverage | Runtime status |
 | --- | --- | --- |
-| First start with an empty bundled source | `plugin-repository/plugin.json`, Browse empty state, projection no-install test | Not observed |
+| First start with no sources or plugins | `PluginCatalogRepositoryTest.freshInitializationHasNoSourcesCatalogsOrPlugins`, Browse empty state, projection no-install test | Not observed |
 | Add a source without installing | Catalog subscription stores metadata only; projection ignores uninstalled entries | Not observed |
 | Install a supported release, then enter works directly | Home/controller install tests; reader `Search("")` on route entry | Not observed |
 | About opens detail without a session | Home store About-vs-open test | Not observed |
@@ -168,7 +169,10 @@ Written tests, all unexecuted:
    This change has not been tested against live images or an installed app. Other
    provider-specific cover headers still require an SDK contract decision;
    browser forbidden-header/CORS restrictions remain.
-5. No offline plugin loading, automatic updates, theme/font switches, disk-cache
+5. Installed package loading now prefers a host-only, installation-pinned signed
+   manifest cache and retains module hash/signature verification. Both package
+   caches must be present to avoid package downloads; API/media offline access is
+   not implemented. No automatic updates, theme/font switches, user-facing cache
    cleanup, bookshelf/history/downloads, account sync, new trust authority, or
    upstream Wasmline changes were added. Extreme image aspect ratios keep the
    existing layout bound while Fit avoids cropping; unrestricted tall-page layout

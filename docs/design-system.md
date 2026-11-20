@@ -262,38 +262,40 @@ History, Updates, or Downloads items merely to fill four navigation slots.
   the keyboard is visible. Notifications follow the resized content anchor without
   adding their own IME padding. Compact navigation paints its own system-bar inset;
   a sibling spacer preserves that inset when navigation is hidden.
-- `EviloMotion` defines 280 ms page/spatial transitions, 180 ms component/effect
-  transitions, 120 ms exit fades, and 360 ms slow Material spatial transitions. Use the
-  same cubic easing `(0.2, 0, 0, 1)` instead of per-page springs and durations.
-  `EviloTheme` supplies this scheme to Material controls and sheets.
-- Forward/back navigation uses a 24-distance horizontal slide and fade, reversing
-  direction on Back and respecting layout direction. Same-depth destination changes
-  fade. Keep full state snapshots and saveable page keys while outgoing content
-  finishes its transition; it must not receive pointer, keyboard, or Back actions.
-  Clip page slides to the content bounds rather than drawing over navigation.
-  Keep the home focus target outside animated page copies. Navigation clears text
-  focus and hides the keyboard before requesting this stable target. Search fields
-  on outgoing pages are disabled immediately, not after the exit animation.
-- Predictive Back uses the Flutter 3.44.2 default Android shared-element page
-  geometry used by the Kira reference: the complete page including its app bar
-  stays opaque during drag, scales from 1 to 0.90, shifts horizontally by
-  `(width / 20 - 8dp) * progress` with the swipe edge, follows vertical touch
-  movement with ease-out, and rounds toward a 32dp fallback radius. The previous
-  page stays still beneath it. Commit restores scale/radius while shifting right
-  by 10% of height and fading out over 400 ms with the emphasized two-part cubic;
-  cancellation returns to the current page. Ordinary button navigation keeps the
-  existing slide/fade. This is a source-level motion match, not a claim of identical
-  pixels: device corner radii and Kira's separate cover-Hero transition are not
-  reproduced. `EviloBackTransitionState` owns preview, not the MVI return stack.
-  Only completion dispatches Back. Disable page input during preview,
-  retain saveable page keys and active sessions, and reject a stale gesture after
-  another navigation changes its destination. Nested Reader/Details handlers take
-  precedence; the catalog delegates to the home stack. The root home destination
-  leaves Back unhandled for Android's system back-to-home animation. Overlays
-  retain their Material dismissal behavior. Older devices and instant Back/Escape
-  keep the same completed-return action without requiring gesture progress.
-  Animated app bars and primary navigation retain their system-inset padding
-  when hidden, so status and gesture-navigation areas remain reserved.
+- `EviloMotion` defines 320 ms page/spatial transitions, 220 ms component/effect
+  transitions, 180 ms exit fades, and 420 ms slow Material spatial transitions.
+  The shared cubic easing is `(0.25, 0.1, 0.25, 1)`; gesture settling uses
+  `(0.16, 0, 0.12, 1)`. `EviloTheme` supplies the scheme to Material controls and sheets.
+- Forward navigation brings a page in from 32dp while the previous page moves
+  behind it by 8dp. Back reveals that previous page underneath and moves the
+  outgoing page 32dp away with a fade. Page fades and movement share the spatial
+  duration, and outgoing content stays mounted until the full transition finishes.
+  Layout direction reverses the offsets. Same-depth page changes fade.
+  Browse/More share a stable home-shell key; only their content slides 20dp and
+  fades over 220 ms. Preserve each tab's saveable key while the toolbar and
+  navigation remain mounted.
+  Animation maps use identity-hashed payload holders, not full page data. Same-route
+  updates refresh the holder's observable content without restarting a transition;
+  route changes retain the outgoing snapshot and its saveable page key.
+  Outgoing pages must not receive pointer, keyboard, or Back actions. Clip slides
+  to the content bounds. Keep the home focus target outside animated page copies;
+  defer focus requests and keyboard changes until a predictive preview finishes.
+- Predictive Back keeps the full outgoing page opaque during drag. Scale reaches
+  0.94, horizontal movement is capped at 28dp, vertical movement at 20dp, and the
+  corner radius reaches 24dp. The destination remains still beneath it. Commit
+  continues toward the gesture's swipe edge and fades out over 260 ms, without
+  enlarging the outgoing page again. Cancellation restores its geometry over
+  220 ms. Only completion dispatches Back. Keep the preview mounted until the
+  route observes the actual navigation change, then reuse the destination payload
+  rather than replaying the ordinary slide/fade. A bounded wait prevents a blocked
+  Back from leaving input disabled indefinitely. `EviloBackTransitionState` owns
+  preview, not the MVI return stack. Disable page input during preview, preserve
+  saveable page keys and active sessions, and reject stale gestures. Nested
+  Reader/Details handlers take precedence; the catalog delegates to the home stack.
+  The root leaves Back unhandled for Android's system back-to-home animation.
+  Overlays retain Material dismissal behavior. Older devices and instant Back/Escape
+  use the same completed-return action without gesture progress. App bars and primary
+  navigation retain hidden system-inset padding so system-bar areas stay reserved.
 - Media-type/source-filter content, app-bar titles, selector icons, search-clear
   actions, progress visibility, selection colors, and changing footer
   sizes use shared component specs. Progress indicators overlay the content edge,

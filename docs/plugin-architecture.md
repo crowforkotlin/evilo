@@ -106,9 +106,11 @@ requires publisher review.
 
 ## Catalogs and releases
 
-The application bundles `plugin-repository/plugin.json`. Adding a source only
+The application supplies no default source or plugin and does not bundle
+`plugin-repository/plugin.json`. Fresh storage has no subscriptions; initialization
+restores only stored records and never recreates a removed source. Adding a source
 requires a URL whose response is catalog JSON; filenames and a `.json` suffix
-are not required. Publishers may host independent sources without a PR to evilo.
+are not required. Publishers host their own sources without a PR to evilo.
 The root only needs `name` and `plugins`; no external JSON Schema is used.
 Catalogs describe authors, region, languages, media kinds, NSFW, introduction,
 optional icon, source repository, releases, compatibility, and forced updates.
@@ -124,10 +126,9 @@ it with an immutable snapshot. A link ending in a Wasm binary or manifest is not
 accepted as a source-code link. Changing defaults can change older inherited
 release metadata; approved installation records are never silently replaced.
 
-The bundled catalog starts empty until an actual signed package and its
-matching source release are published. No guessed release URL is presented as an
-installable package. A provider repository's exporter writes a full catalog entry
-together with a source archive when the publisher supplies real release URLs.
+No guessed release URL is presented as an installable package. A provider
+repository's exporter writes a full catalog entry together with a source archive
+when the publisher supplies real release URLs.
 `docs/plugin-catalog.md` documents independent hosting and the compact format.
 The signed manifest binds the runtime descriptor, source revision, and
 archive hash. An identity-checking network wrapper compares those declarations
@@ -147,9 +148,9 @@ installations; an incompatible
 mandatory release requires an application update rather than falling back to an
 older version. Failed refreshes preserve prior data and display the failure.
 Known minimum version floors are persisted monotonically and stay scoped to
-their source. A built-in source's floor does not block copies of the same signed
-plugin ID in other subscriptions. The built-in source can be disabled, not
-removed. Removing a custom source removes its cache,
+their source and cannot block copies of the same signed plugin ID in other
+subscriptions. Every source can be disabled or removed, including sources
+retained from earlier automatically seeded startup data. Removing a source removes its cache,
 installations, and scoped floors, but preserves plugin data. An uninstall erases
 plugin data only after its last installation across subscriptions is removed.
 
@@ -162,17 +163,42 @@ host applies the subscription and request restrictions at runtime. Plugin reques
 otherwise reach any HTTPS host they name; installing the plugin is the
 authorization decision.
 
+On Android 17 (API 37) and later, builds targeting API 37 or later also declare
+and request `ACCESS_LOCAL_NETWORK`. `MainActivity` waits for the permission result
+before starting `App`, so startup refreshes do not race the permission prompt.
+Denial does not prevent using the app, but LAN sources remain unavailable until
+the user allows Nearby devices in system settings. HTTP source consent does not
+grant this Android permission.
+
 ## Resource limits and remaining risks
 
 The host bounds catalog/manifest downloads at 10 MiB, artifacts at 64 MiB, API
 responses at 2 MiB, images at 16 MiB, and request bodies at 64 KiB. Requests have a
 30-second total timeout and at most four simultaneous exchanges in the one
 application-owned Ktor transport.
-Manifest reuse is disabled (`manifestTtlMs = 0`); each open fetches a signed manifest
-and performs signature/descriptor checks. The loader's default artifact cache is
-enabled instead of `WasmlineNoOpCache`, with a configured native limit of 128 MiB.
-Cached artifacts are checked against the size and SHA-256 declared by the signed
-manifest before loading. This does not implement offline loading. Descriptors use upstream's default
+The loader's URL/TTL manifest reuse is disabled (`manifestTtlMs = 0`) so its
+network-client interface always passes bytes through the application's identity
+check. `CachedPackageClient` supplies an installed release's exact signed bytes
+from the separate host-only `PluginManifestCache`, addressed by the installation's
+approved SHA-256. Every load repeats the digest, identity, provenance, descriptor,
+and Wasmline Ed25519 signature checks. Cache hits report `VERIFYING_PACKAGE`, not
+`FETCHING_MANIFEST`; artifacts keep their original URL base and network policy.
+Missing or corrupt entries download again and still must match the approved digest.
+New-release installs bypass this cache. Downloaded bytes are persisted only after
+the signed runtime load succeeds and `AppPluginController` accepts/records the
+installation, never from `onManifestChecked` alone. Cached opens do not poll for
+remote manifest replacement. Catalog refresh still checks withdrawal and metadata.
+
+Room database version 2 adds only `plugin_manifest_cache`; explicit migration
+preserves sources, catalog caches, installations, floors, and guest data. The
+manifest cache evicts least-recently-used entries above 16 MiB or 256 entries,
+with a 2 MiB per-manifest limit. It is not exposed through guest storage.
+The loader's default artifact cache remains enabled instead of `WasmlineNoOpCache`,
+with a configured native limit of 128 MiB. Cached artifacts are checked against
+the size and SHA-256 declared by the signed manifest before loading. Both caches
+can eliminate package-network requests when present; eviction or missing artifacts
+can still require downloads. API/search/content/images retain their network needs;
+this is not an offline-media/download feature. Descriptors use upstream's default
 16 KiB metadata-string limit. Plugin steps are bounded at 4 MiB, continuation
 context at 128 KiB, HTTP exchanges at 512, chapters at 20,000, ordered images at
 2000, and streams at 32.
@@ -281,8 +307,9 @@ per-source uninstall, rather than deleting all same-ID copies through one button
 `HomePage` owns returnable settings/source/detail/browser routes; one `HomeOverlay`
 owns selectors and approval/removal/uninstall confirmations. Approval rechecks
 the exact reviewed release. Install-only closes its verification session and
-retains its initiating page; install-and-browse reuses that session. Opening still
-reacquires the remote signed manifest and is not an offline-loading guarantee.
+retains its initiating page; install-and-browse reuses that session. Opening
+recreates the signed runtime, preferring the pinned local manifest and cached
+modules, but this is not a guarantee of offline content or cache availability.
 An unchanged installed release retains its original record and timestamp.
 Text and images have in-app viewing code. Videos open in an external application
 after initial URL approval; custom HTTP headers are rejected. The external

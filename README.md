@@ -8,9 +8,9 @@ Wasmline plugins loaded from JSON catalogs, not app dependencies or APK extensio
 
 This repository is the host application: the Compose UI, plugin loading and
 verification, catalogs, storage, and network policy. Provider code, signed
-packages, and signing keys never live here. The bundled
-`plugin-repository/plugin.json` is a subscription source, not a place to develop
-a provider.
+packages, and signing keys never live here. Evilo supplies no default plugin or
+source. `plugin-repository/plugin.json` is a legacy catalog file, not app startup
+data or a place to develop a provider.
 
 To publish a provider, use the plugin development template as the starting
 layout: `https://github.com/crowforkotlin/evilo-plugin-template`. Each provider keeps
@@ -33,7 +33,7 @@ evilo-ios/                   Xcode/SwiftUI launcher; not a Gradle subproject
 evilo-build-logic/
   base/                      KMP/Android conventions and shared property lookup
   app/                       Compose/desktop/web conventions and signing/catalog tasks
-plugin-repository/           One editable bundled plugin.json
+plugin-repository/           Legacy plugin.json, not bundled or subscribed automatically
 docs/                        Plugin contracts and shared UI design rules
 ```
 
@@ -121,11 +121,17 @@ The strictest known NSFW classification among installed sources applies to all c
 
 Installation requires explicit release review. Install stays on the management
 page and closes the verification session; Install and browse reuses that verified
-session for the works catalog. Opening still fetches and verifies a signed remote
-manifest, but content-addressed modules can reuse Wasmline's hash-checked artifact
-cache (128 MiB configured limit). Installation pins the verified SHA-256 of the
-exact signed manifest bytes; opening rejects changed bytes even if the same
-publisher signs them. Installation does not imply offline availability. Legacy
+session for the works catalog. Successfully accepted loads save the exact verified
+signed manifest in a separate host-controlled Room cache (16 MiB / 256 entries,
+2 MiB per manifest). Installed opens prefer the installation-pinned SHA-256 entry
+and still repeat signature, identity, provenance, and descriptor checks. Missing
+or corrupt entries download again and must match the original approval. Installing
+a new release fetches its manifest rather than reusing the old release. The loader's
+URL/TTL manifest reuse remains disabled; content-addressed modules retain Wasmline's
+hash-checked artifact cache (128 MiB configured native limit). Cached opens do not
+poll the remote manifest for changes. Package loading can avoid network access
+when both caches are present; content, search, and images can still require it.
+Installation does not guarantee offline availability. Legacy
 installations without that digest require one explicit review/reinstall; an
 unchanged release retains its original installation timestamp. Returning or
 replacing a load cancels obsolete work and closes acquired handles before another
@@ -173,11 +179,12 @@ Image/text reading code is shared. Video URLs open externally after approval;
 custom playback headers are unsupported. Library/history, saved reading progress,
 downloads, cloud sync, login, and in-app video are not implemented.
 
-The bundled `plugin-repository/plugin.json` remains empty until actual signed
-packages and matching source archives are published. The default refresh
-URL is `https://raw.githubusercontent.com/crowforkotlin/evilo/main/plugin-repository/plugin.json`.
-Pushing application or plugin source code does not publish an installable plugin
-package. SDK publication is configured, not established remotely.
+A fresh app has zero sources and plugins. App compilation does not generate a
+bundled catalog, and startup restores only stored subscriptions, catalog caches,
+and installations. Existing sources from earlier versions are retained, including
+historical automatically subscribed sources; all can be removed without being
+recreated on restart. Pushing application or plugin source code does not publish
+an installable plugin package. SDK publication is configured, not established remotely.
 
 ## Install a plugin
 
@@ -200,16 +207,16 @@ addresses.
    manages versions, updates, source copies, and per-source uninstall.
    No WLM URL, key ID, or Ed25519 key is entered by the user.
 
-The built-in source is already subscribed and can be disabled. An empty
-`plugin.json` means there are no releases to install from it; refreshing an empty
-list does not create a plugin. Catalog filenames are unrestricted: `plugin.json`,
+Sources must be added explicitly. An empty `plugin.json` means there are no
+releases to install from that source; refreshing an empty list does not create a
+plugin. Catalog filenames are unrestricted: `plugin.json`,
 `plugins.json`, another name, or an endpoint without a `.json` suffix is accepted
 when its response satisfies the catalog format. The illustrative URLs in the
 catalog documentation are not installable releases.
 
 ## Publish your own plugin source
 
-Host your catalog independently; no PR to evilo's bundled `plugin.json` is needed.
+Host your catalog independently; no PR or source registration with evilo is needed.
 Share its direct HTTP(S) URL for users to subscribe through Plugin Sources. The
 smallest valid source is:
 
@@ -251,7 +258,7 @@ repository's own documentation covers export commands.
 | `gradle.properties` | Gradle/Kotlin execution configuration |
 | `gradle/wrapper/gradle-wrapper.properties` | Gradle distribution/checksum |
 | `evilo-ios/Configuration/Config.xcconfig` | Apple signing and shared property mappings |
-| `plugin-repository/plugin.json` | Default bundled catalog, editable by publishers |
+| `plugin-repository/plugin.json` | Legacy catalog file; not bundled or subscribed automatically |
 | `EVILO_PUBLIC_KEY_HEX` / external `public.key` | Official Ed25519 public verification key supplied to app configuration generation |
 
 `project.properties` remains plain Java/Xcode-compatible `KEY=value` assignments.
