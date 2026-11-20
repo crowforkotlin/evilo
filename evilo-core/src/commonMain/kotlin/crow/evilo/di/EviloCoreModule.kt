@@ -13,7 +13,9 @@ import crow.evilo.plugin.api.HostDescriptor
 import crow.evilo.plugin.catalog.PluginCatalogRepository
 import crow.evilo.storage.EviloPreferences
 import crow.evilo.storage.EviloPreferencesRepository
+import crow.evilo.storage.MemoryPluginManifestCache
 import crow.evilo.storage.PluginCatalogStore
+import crow.evilo.storage.PluginManifestCache
 import crow.wasmline.loader.WasmlineTrustedKeys
 import kotlinx.coroutines.CoroutineScope
 import org.koin.dsl.module
@@ -25,16 +27,18 @@ fun eviloCoreModule(
     catalogs: PluginCatalogStore,
     appScope: CoroutineScope,
     debugDiagnostics: Boolean = false,
+    manifests: PluginManifestCache = MemoryPluginManifestCache(),
 ) = module {
     single { host }
     single { trustedKeys }
     single<DataStore<EviloPreferences>> { preferences }
     single<PluginCatalogStore> { catalogs }
+    single<PluginManifestCache> { manifests }
     single { EviloPreferencesRepository(get()) }
     single { createEviloHttpClient() }
     single { BoundedHttpTransport(get()) }
     single { PluginCatalogRepository(get(), get(), get(), get(), officialKeys = get()) }
-    single { PluginSessionFactory(get(), get(), get(), get()) }
+    single { PluginSessionFactory(get(), get(), get(), get(), get()) }
     single { AppPluginController(get(), get<PluginSessionFactory>(), appScope, debugDiagnostics) }
     single { PluginHomeStore(get(), get(), appScope) }
     factory { (session: MediaSourceSession, kind: MediaKind) -> MediaBrowserController(session, kind, appScope) }

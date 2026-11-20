@@ -158,7 +158,7 @@
     <string name="plugin_phase_package">Preparing the signed plugin loader</string>
     <string name="plugin_loading">Opening plugin…</string>
     <string name="plugin_phase_manifest">Downloading the signed manifest</string>
-    <string name="plugin_phase_verification">Verifying the manifest, resolving cached modules and preparing the runtime</string>
+    <string name="plugin_phase_verification">Verifying the signed manifest and checking cached modules</string>
     <string name="plugin_phase_download">Downloading the selected module</string>
     <string name="plugin_phase_runtime">Checking module integrity and initializing the runtime</string>
     <string name="plugin_debug_timings">Plugin startup timings (debug)</string>
@@ -241,7 +241,7 @@
     <string name="settings_font_license">ChillRound font license</string>
     <string name="settings_license_description">Evilo project license and the bundled font attribution</string>
     <string name="settings_signed_loading">Installed does not mean offline</string>
-    <string name="settings_signed_loading_description">Each open fetches and verifies the signed manifest. Hash-checked modules are cached for reuse; offline plugin loading is not implemented.</string>
+    <string name="settings_signed_loading_description">Installed plugins reuse a local signed manifest while rechecking its signature and approved SHA-256. Missing manifests and modules require downloads; content and images may still need a network connection.</string>
     <string name="image_missing_page">No image address for this page</string>
     <string name="image_cover_failed">Cover failed to load</string>
     <string name="image_page_failed">Page image failed to load</string>

@@ -3,6 +3,9 @@
 package crow.evilo.app
 
 import androidx.datastore.core.DataStore
+import crow.evilo.feature.reader.MediaSourceSession
+import crow.evilo.plugin.catalog.CatalogPlugin
+import crow.evilo.plugin.catalog.PluginRelease
 import crow.evilo.plugin.catalog.PluginCatalogRepositoryTest.RepositoryFixture
 import crow.evilo.plugin.catalog.catalogPlugin
 import crow.evilo.plugin.catalog.descriptor
@@ -26,6 +29,89 @@ import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class AppPluginControllerTest {
+    @Test
+    fun manifestCacheIsCommittedOnlyAfterInstallationIsRecorded() = runTest {
+        val fixture = RepositoryFixture(pluginCatalog())
+        fixture.initialize()
+        val listing = fixture.repository.state.value.listings.single()
+        val release = listing.plugin.latestRelease
+        val acquired = mutableListOf<TestPluginSession>()
+        var commits = 0
+        val connector = object : PluginSessionConnector {
+            override suspend fun connect(plugin: CatalogPlugin,
+                release: PluginRelease, allowHttp: Boolean,
+                onPhase: (PluginLoadPhase) -> Unit): MediaSourceSession =
+                TestPluginSession(plugin.descriptor(release)).also { acquired += it }
+            override suspend fun cacheVerifiedManifest(session: MediaSourceSession) {
+                assertSame(acquired.last(), session)
+                assertEquals(session.verifiedManifestSha256, fixture.repository.state.value.installed.single().approvedManifestSha256)
+                assertEquals(0, acquired.last().closeCalls)
+                commits++
+            }
+        }
+        val controller = AppPluginController(fixture.repository, connector, this)
+        try {
+            controller.install(listing, release)
+            controller.awaitIdle()
+            assertEquals(1, commits)
+            assertEquals(1, acquired.single().closeCalls)
+            assertNull(controller.state.value.error)
+            controller.open(fixture.repository.state.value.installed.single())
+            controller.awaitIdle()
+            assertEquals(2, commits)
+            assertNull(controller.state.value.error)
+        } finally { controller.close(); fixture.transport.close() }
+    }
+
+    @Test
+    fun failedSignedLoadingNeverCommitsAManifestCacheEntry() = runTest {
+        val fixture = RepositoryFixture(pluginCatalog())
+        fixture.initialize()
+        val listing = fixture.repository.state.value.listings.single()
+        var commits = 0
+        val connector = object : PluginSessionConnector {
+            override suspend fun connect(plugin: CatalogPlugin,
+                release: PluginRelease, allowHttp: Boolean,
+                onPhase: (PluginLoadPhase) -> Unit): MediaSourceSession =
+                error("Signed loading failed.")
+            override suspend fun cacheVerifiedManifest(session: MediaSourceSession) { commits++ }
+        }
+        val controller = AppPluginController(fixture.repository, connector, this)
+        try {
+            controller.install(listing, listing.plugin.latestRelease)
+            controller.awaitIdle()
+            assertEquals(0, commits)
+            assertTrue(fixture.repository.state.value.installed.isEmpty())
+            assertTrue(controller.state.value.error.orEmpty().contains("Signed loading failed"))
+        } finally { controller.close(); fixture.transport.close() }
+    }
+
+    @Test
+    fun aSessionRejectedByTheInstallationApprovalIsNotCached() = runTest {
+        val fixture = RepositoryFixture(pluginCatalog())
+        fixture.initialize()
+        val listing = fixture.repository.state.value.listings.single()
+        val release = listing.plugin.latestRelease
+        fixture.repository.recordInstallation(listing, release, listing.plugin.descriptor(release), "d".repeat(64))
+        val session = TestPluginSession(listing.plugin.descriptor(release), verifiedManifestSha256 = "e".repeat(64))
+        var commits = 0
+        val connector = object : PluginSessionConnector {
+            override suspend fun connect(plugin: CatalogPlugin,
+                release: PluginRelease, allowHttp: Boolean,
+                onPhase: (PluginLoadPhase) -> Unit): MediaSourceSession = session
+            override suspend fun cacheVerifiedManifest(session: MediaSourceSession) { commits++ }
+        }
+        val controller = AppPluginController(fixture.repository, connector, this)
+        try {
+            controller.open(fixture.repository.state.value.installed.single())
+            controller.awaitIdle()
+            assertEquals(0, commits)
+            assertEquals(1, session.closeCalls)
+            assertNull(controller.state.value.active)
+            assertTrue(controller.state.value.error.orEmpty().contains("installed approval"))
+        } finally { controller.close(); fixture.transport.close() }
+    }
+
     @Test
     fun installedOpenRejectsADifferentVerifiedManifestAndClosesTheSession() = runTest {
         val fixture = RepositoryFixture(pluginCatalog())

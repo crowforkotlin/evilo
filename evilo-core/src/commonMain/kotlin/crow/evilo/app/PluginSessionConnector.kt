@@ -21,4 +21,7 @@ fun interface PluginSessionConnector {
     suspend fun connectInstalled(plugin: CatalogPlugin, release: PluginRelease, allowHttp: Boolean,
         approvedManifestSha256: String?, onPhase: (PluginLoadPhase) -> Unit): MediaSourceSession =
         connect(plugin, release, allowHttp, onPhase)
+
+    /** Persist downloaded bytes only after signed loading and installation acceptance both succeed. */
+    suspend fun cacheVerifiedManifest(session: MediaSourceSession) = Unit
 }

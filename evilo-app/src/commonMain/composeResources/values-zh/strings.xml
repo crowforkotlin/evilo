@@ -158,7 +158,7 @@
     <string name="plugin_phase_package">正在准备签名插件加载器</string>
     <string name="plugin_loading">正在打开插件…</string>
     <string name="plugin_phase_manifest">正在下载签名清单</string>
-    <string name="plugin_phase_verification">正在验签、检查缓存模块并准备运行时</string>
+    <string name="plugin_phase_verification">正在验证签名清单并检查模块缓存</string>
     <string name="plugin_phase_download">正在下载所选模块</string>
     <string name="plugin_phase_runtime">正在校验模块完整性并初始化运行时</string>
     <string name="plugin_debug_timings">插件启动耗时（debug）</string>
@@ -241,7 +241,7 @@
     <string name="settings_font_license">ChillRound 字体许可证</string>
     <string name="settings_license_description">evilo 项目许可证与内置字体来源说明</string>
     <string name="settings_signed_loading">已安装不等于离线可用</string>
-    <string name="settings_signed_loading_description">每次打开仍获取并验证签名清单；模块经过哈希校验后缓存复用，尚未实现离线插件加载。</string>
+    <string name="settings_signed_loading_description">已安装插件优先读取本地签名清单，仍重新校验签名和批准的 SHA-256。清单或模块缓存缺失时需要下载，内容和图片也可能仍需联网。</string>
     <string name="image_missing_page">该页没有图片地址</string>
     <string name="image_cover_failed">封面加载失败</string>
     <string name="image_page_failed">该页图片加载失败</string>

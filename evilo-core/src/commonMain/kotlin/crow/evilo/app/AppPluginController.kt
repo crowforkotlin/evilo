@@ -117,6 +117,8 @@ class AppPluginController(
             require(repository.state.value.selectedKind in session.source.descriptor.kinds) { "This release does not support the selected content type." }
             val key = accept(session)
             currentCoroutineContext().ensureActive()
+            sessions.cacheVerifiedManifest(session)
+            currentCoroutineContext().ensureActive()
             if (activate) {
                 val installation = repository.state.value.installed.firstOrNull { it.key == key } ?: error("This plugin was uninstalled.")
                 require(repository.installationBlockReason(installation) == null) { repository.installationBlockReason(installation).orEmpty() }

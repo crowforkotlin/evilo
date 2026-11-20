@@ -67,7 +67,8 @@ internal class AppEnvironment private constructor(
                         GeneratedEviloConfiguration.PLUGIN_PUBLIC_KEY_HEX.hexToByteArray() else null
                 }
                 val container = koinApplication {
-                    modules(eviloCoreModule(host, trustedKeys, backend.preferences, backend.catalogs, scope, debugDiagnostics), eviloUiModule(context))
+                    modules(eviloCoreModule(host, trustedKeys, backend.preferences, backend.catalogs, scope, debugDiagnostics,
+                        manifests = backend.manifests), eviloUiModule(context))
                 }.also { application = it }
                 val http = container.koin.get<BoundedHttpTransport>().also { transport = it }
                 val imageLoader = container.koin.get<EviloImages>().also { images = it }
