@@ -102,7 +102,7 @@ fun MediaBrowserRoute(session: MediaSourceSession, kind: MediaKind, onClose: () 
     val state by controller.state.collectAsState()
     val connected by images.connected.collectAsState()
     val savedPages = rememberSaveableStateHolder()
-    val backTransition = rememberEviloBackTransition(state)
+    val backTransition = rememberEviloBackTransition(state, ::mediaPageKey)
     val focus = remember { FocusRequester() }
     val pageActive = LocalEviloPageActive.current
     val toasts = LocalEviloToastState.current
@@ -115,7 +115,9 @@ fun MediaBrowserRoute(session: MediaSourceSession, kind: MediaKind, onClose: () 
     // Catalog/disconnected Back belongs to the home stack, which can preview its real destination.
     EviloPredictiveBackHandler((pageActive || backTransition.previewing) && connected && state.page != MediaBrowserPage.CATALOG && !showLoadDiagnostics,
         backTransition, state, state.backDestination(), navigationKey = mediaPageKey(state), onBack = back)
-    LaunchedEffect(controller, state.page, pageActive) { if (pageActive) focus.requestFocus() }
+    LaunchedEffect(controller, state.page, pageActive, backTransition.previewing) {
+        if (pageActive && !backTransition.previewing) focus.requestFocus()
+    }
     LaunchedEffect(state.error, state.page, pageActive, connected) {
         errorToastId?.let { toasts.dismiss(it, notify = false) }
         errorToastId = state.error?.takeIf { pageActive && connected }?.let { error ->

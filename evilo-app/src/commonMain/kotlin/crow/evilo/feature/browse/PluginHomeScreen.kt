@@ -93,7 +93,6 @@ import crow.evilo.feature.settings.AppSafetyScreen
 import crow.evilo.feature.settings.SettingsScreen
 import crow.evilo.feature.settings.settingsSectionTitle
 import crow.evilo.plugin.api.HostDescriptor
-import crow.evilo.plugin.catalog.BUNDLED_SOURCE_ID
 import crow.evilo.ui.EviloAsyncImage
 import crow.evilo.ui.EviloBarTransition
 import crow.evilo.ui.EviloContentTransition
@@ -138,7 +137,7 @@ private fun PluginHomeScreen(state: PluginHomeState, images: EviloImages, host: 
     val keyboard = LocalSoftwareKeyboardController.current
     val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     val savedPages = rememberSaveableStateHolder()
-    val backTransition = rememberEviloBackTransition(state)
+    val backTransition = rememberEviloBackTransition(state, ::homeTransitionKey)
     val previous = if (page != null && state.overlay == null) state.copy(pages = state.pages.dropLast(1),
         connection = if (page is HomePage.PluginBrowser) state.connection.copy(active = null, busy = false) else state.connection,
         actionError = null) else null
@@ -150,8 +149,8 @@ private fun PluginHomeScreen(state: PluginHomeState, images: EviloImages, host: 
     val installedMessage = stringResource(Res.string.plugin_installed_notice)
     val browseAction = stringResource(Res.string.plugin_browse)
     val searchLabels = browseSearchLabels()
-    LaunchedEffect(homePageKey(state), active) {
-        if (active == null) {
+    LaunchedEffect(homePageKey(state), active, backTransition.previewing) {
+        if (active == null && !backTransition.previewing) {
             focusManager.clearFocus(force = true)
             keyboard?.hide()
             focus.requestFocus()
@@ -175,7 +174,7 @@ private fun PluginHomeScreen(state: PluginHomeState, images: EviloImages, host: 
     EviloPredictiveBackHandler(backEnabled, backTransition, state, previous,
         navigationKey = state.pages to state.overlay, onBack = { dispatch(PluginHomeIntent.Back) })
     // One stable focus target avoids requesting focus through both animated page copies.
-    EviloPageTransition(state, contentKey = ::homePageKey, depth = { it.pages.size },
+    EviloPageTransition(state, contentKey = ::homeTransitionKey, depth = { it.pages.size },
         modifier = Modifier.onPreviewKeyEvent {
             if (!backTransition.previewing && backEnabled && active == null && it.key == Key.Escape && it.type == KeyEventType.KeyUp) {
                 dispatch(PluginHomeIntent.Back)
@@ -223,24 +222,28 @@ private fun PluginHomeScreen(state: PluginHomeState, images: EviloImages, host: 
                             else -> EviloLayout.ReaderMaxWidth
                         }
                         Box(Modifier.widthIn(max = contentWidth).fillMaxSize()) {
-                            savedPages.SaveableStateProvider(homePageKey(displayed)) {
+                            savedPages.SaveableStateProvider(homeTransitionKey(displayed)) {
                                 when (displayedPage) {
-                                    null -> when (displayed.destination) {
-                                        HomeDestination.BROWSE -> EviloContentTransition(displayed.catalog.selectedKind, label = "browse-kind") {
-                                            kind -> savedPages.SaveableStateProvider("browse:$kind") {
-                                                // The transition recomposes every frame, so the projection is
-                                                // computed once per input change rather than per frame.
-                                                val projection = remember(displayed.entries, displayed.catalog, kind,
-                                                    displayed.query, displayed.browseSourceId, searchLabels) {
-                                                    projectBrowse(displayed.catalog.copy(selectedKind = kind),
-                                                        displayed.entries, kind, displayed.query, displayed.browseSourceId, searchLabels)
+                                    null -> EviloContentTransition(displayed, Modifier.fillMaxSize(),
+                                        contentKey = { it.destination }, label = "home-destination",
+                                        direction = { from, to -> to.destination.ordinal.compareTo(from.destination.ordinal) }) { root ->
+                                        savedPages.SaveableStateProvider("root:${root.destination}") {
+                                            when (root.destination) {
+                                                HomeDestination.BROWSE -> EviloContentTransition(root.catalog.selectedKind, label = "browse-kind") {
+                                                    kind -> savedPages.SaveableStateProvider("browse:$kind") {
+                                                        val projection = remember(root.entries, root.catalog, kind,
+                                                            root.query, root.browseSourceId, searchLabels) {
+                                                            projectBrowse(root.catalog.copy(selectedKind = kind),
+                                                                root.entries, kind, root.query, root.browseSourceId, searchLabels)
+                                                        }
+                                                        PluginBrowseScreen(root.copy(catalog = root.catalog.copy(selectedKind = kind),
+                                                            browse = projection), images, dispatch,
+                                                            enabled = kind == root.catalog.selectedKind)
+                                                    }
                                                 }
-                                                PluginBrowseScreen(displayed.copy(catalog = displayed.catalog.copy(selectedKind = kind),
-                                                    browse = projection), images, dispatch,
-                                                    enabled = kind == displayed.catalog.selectedKind)
+                                                HomeDestination.MORE -> PluginMoreScreen(root, dispatch)
                                             }
                                         }
-                                        HomeDestination.MORE -> PluginMoreScreen(displayed, dispatch)
                                     }
                                     HomePage.Sources -> PluginSourcesScreen(displayed, dispatch)
                                     HomePage.AddSource -> AddPluginSourceScreen(displayed, dispatch)
@@ -302,6 +305,8 @@ private fun PluginHomeScreen(state: PluginHomeState, images: EviloImages, host: 
         null -> Unit
     }
 }
+
+internal fun homeTransitionKey(state: PluginHomeState): String = state.page?.toString() ?: "home-root"
 
 private fun homePageKey(state: PluginHomeState): String = state.page?.toString() ?: "root:${state.destination}"
 
@@ -418,8 +423,7 @@ private fun PluginBrowseScreen(state: PluginHomeState, images: EviloImages, disp
 
 @Composable
 private fun BrowseEmptyState(state: PluginHomeState, dispatch: (PluginHomeIntent) -> Unit, enabled: Boolean) {
-    val ready = state.catalog.subscriptions.any { it.id != BUNDLED_SOURCE_ID } ||
-        state.catalog.snapshots.any { it.catalog.plugins.isNotEmpty() }
+    val ready = state.catalog.subscriptions.isNotEmpty()
     val title = when (state.browse.emptyReason) {
         BrowseEmptyReason.NO_INSTALLATIONS -> if (ready) Res.string.browse_sources_ready else Res.string.browse_empty_installed
         BrowseEmptyReason.SOURCES_DISABLED -> Res.string.browse_disabled_title
@@ -450,7 +454,7 @@ private fun BrowseEmptyState(state: PluginHomeState, dispatch: (PluginHomeIntent
 
 @Composable
 private fun InstalledPluginsScreen(state: PluginHomeState, images: EviloImages, dispatch: (PluginHomeIntent) -> Unit) {
-    val projection = projectInstalledManagement(state)
+    val projection = remember(state.entries, state.catalog, state.installedQuery) { projectInstalledManagement(state) }
     LazyVerticalGrid(GridCells.Adaptive(EviloLayout.PluginCardMinWidth), Modifier.fillMaxSize(), contentPadding = PaddingValues(EviloLayout.PagePadding),
         horizontalArrangement = Arrangement.spacedBy(EviloSpacing.Large), verticalArrangement = Arrangement.spacedBy(EviloSpacing.Medium)) {
         item(span = { GridItemSpan(maxLineSpan) }) {

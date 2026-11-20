@@ -2,7 +2,6 @@ package crow.evilo.ui
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
-import androidx.compose.animation.core.Easing
 import androidx.compose.animation.core.SeekableTransitionState
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
@@ -11,6 +10,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.backhandler.PredictiveBackHandler
 import androidx.compose.ui.platform.LocalInspectionMode
@@ -18,8 +19,10 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.abs
 import kotlin.math.sign
 
@@ -28,45 +31,40 @@ internal data class EviloBackEvent(val progress: Float, val touchY: Float = 0f, 
 
 internal data class EviloBackGeometry(val scale: Float, val x: Float, val y: Float, val radius: Float, val alpha: Float)
 
-/** Flutter 3.44.2's default Android shared-element predictive page motion, in physical pixels. */
+/** Gesture-following page motion in physical pixels; commit continues toward the swipe edge. */
 internal object EviloPredictiveMotion {
-    const val CommitMillis = 400
-    const val CancelMillis = 300
+    const val CommitMillis = 260
+    const val CancelMillis = 220
     private val easeOut = CubicBezierEasing(0f, 0f, 0.58f, 1f)
-    private val emphasizedStart = CubicBezierEasing(0.05f / 0.166666f, 0f, 0.133333f / 0.166666f, 0.06f / 0.4f)
-    private val emphasizedEnd = CubicBezierEasing((0.208333f - 0.166666f) / (1f - 0.166666f), (0.82f - 0.4f) / 0.6f,
-        (0.25f - 0.166666f) / (1f - 0.166666f), 1f)
-    // Flutter's easeInOutCubicEmphasized is a two-segment cubic, not MD3's ordinary easing.
-    val emphasized = Easing { value ->
-        if (value < 0.166666f) {
-            0.4f * emphasizedStart.transform(value / 0.166666f)
-        } else {
-            0.4f + 0.6f * emphasizedEnd
-                .transform((value - 0.166666f) / (1f - 0.166666f))
-        }
-    }
 
     fun geometry(progress: Float, dragY: Float, fromRight: Boolean, width: Float, height: Float,
         density: Float, commit: Float = 0f): EviloBackGeometry {
         val p = progress.coerceIn(0f, 1f)
         val c = commit.coerceIn(0f, 1f)
-        val xShift = width / 20f - 8f * density
-        val yMax = (height / 20f - 8f * density).coerceAtLeast(0f)
+        val xShift = (width * 0.06f).coerceIn(0f, 28f * density)
+        val yMax = (height * 0.025f).coerceIn(0f, 20f * density)
         val y = if (height > 0f) easeOut.transform((abs(dragY) / height).coerceIn(0f, 1f)) * sign(dragY) * yMax else 0f
-        val bounce = p * (1f - c)
+        val direction = if (fromRight) -1f else 1f
+        val dragX = xShift * p
+        val commitX = (width * 0.14f).coerceAtLeast(dragX)
         return EviloBackGeometry(
-            scale = 1f - 0.1f * bounce,
-            x = (if (fromRight) -xShift else xShift) * p * (1f - c) + height * 0.1f * c,
-            y = y * (1f - c),
-            radius = 32f * density * bounce,
+            scale = 1f - 0.06f * p,
+            x = direction * (dragX + (commitX - dragX) * c),
+            y = y * p * (1f - c),
+            radius = 24f * density * p,
             alpha = 1f - c,
         )
     }
 }
 
 /** The store is changed only after completion; both pages stay composed during a gesture. */
-internal class EviloBackTransitionState<T>(initialState: T) {
-    val transition = SeekableTransitionState(initialState)
+internal class EviloBackTransitionState<T>(initialState: T, private val contentKey: (T) -> Any?) {
+    private val payloads = EviloTransitionPayloadCache(initialState, contentKey)
+    val transition = SeekableTransitionState(payloads.target(initialState))
+
+    // Recomposition during a gesture must not overwrite either captured page.
+    fun target(value: T): EviloTransitionPayload<T> =
+        if (previewing) transition.currentState else payloads.target(value)
     var previewing by mutableStateOf(false)
         private set
     var outgoing: T? by mutableStateOf(null)
@@ -78,43 +76,54 @@ internal class EviloBackTransitionState<T>(initialState: T) {
     var commitFraction by mutableStateOf(0f)
         private set
 
-    suspend fun handle(progress: Flow<EviloBackEvent>, current: T, previous: T?, isCurrent: () -> Boolean, onBack: () -> Unit) {
+    suspend fun handle(progress: Flow<EviloBackEvent>, current: T, previous: T?, isCurrent: () -> Boolean, onBack: () -> Unit,
+        awaitNavigation: suspend () -> Unit = {}) {
         if (!isCurrent()) { progress.collect { }; return }
+        val currentTarget = target(current)
+        val previousTarget: EviloTransitionPayload<T>? = previous?.let { EviloTransitionPayload<T>(it, contentKey(it)) }
         var started = false
+        var committing = false
         try {
             progress.collect { next ->
-                if (previous != null) {
+                if (previousTarget != null) {
                     if (!started) {
                         started = true
                         startY = next.touchY
                         outgoing = current
                         previewing = true
-                        transition.snapTo(current)
+                        transition.snapTo(currentTarget)
                         // Mount the real destination without playing the ordinary slide/fade.
-                        transition.seekTo(0f, previous)
+                        transition.seekTo(0f, previousTarget)
                     }
                     event = next.copy(progress = next.progress.coerceIn(0f, 1f))
                 }
             }
             if (isCurrent()) {
                 if (started) {
-                    Animatable(0f).animateTo(1f, tween(EviloPredictiveMotion.CommitMillis, easing = EviloPredictiveMotion.emphasized)) {
+                    Animatable(0f).animateTo(1f, tween(EviloPredictiveMotion.CommitMillis, easing = EviloMotion.SettleEasing)) {
                         commitFraction = value
                     }
                 }
                 if (isCurrent()) {
-                    if (started && previous != null) transition.snapTo(previous)
+                    if (started && previousTarget != null) {
+                        transition.snapTo(previousTarget)
+                        payloads.adopt(previousTarget)
+                        committing = true
+                    }
                     onBack()
+                    if (started) awaitNavigation()
+                } else if (started) {
+                    transition.snapTo(currentTarget)
                 }
             }
         } catch (cancelled: CancellationException) {
-            if (started && currentCoroutineContext().isActive) {
+            if (started && !committing && currentCoroutineContext().isActive) {
                 val cancelledEvent = event
-                Animatable(1f).animateTo(0f, tween(EviloPredictiveMotion.CancelMillis, easing = EviloMotion.Easing)) {
+                Animatable(1f).animateTo(0f, tween(EviloPredictiveMotion.CancelMillis, easing = EviloMotion.SettleEasing)) {
                     event = cancelledEvent.copy(progress = cancelledEvent.progress * value,
                         touchY = startY + (cancelledEvent.touchY - startY) * value)
                 }
-                transition.snapTo(current)
+                transition.snapTo(currentTarget)
             }
             throw cancelled
         } finally {
@@ -127,8 +136,8 @@ internal class EviloBackTransitionState<T>(initialState: T) {
 }
 
 @Composable
-internal fun <T> rememberEviloBackTransition(initialState: T): EviloBackTransitionState<T> =
-    remember { EviloBackTransitionState(initialState) }
+internal fun <T> rememberEviloBackTransition(initialState: T, contentKey: (T) -> Any?): EviloBackTransitionState<T> =
+    remember { EviloBackTransitionState(initialState, contentKey) }
 
 @Suppress("DEPRECATION")
 @OptIn(ExperimentalComposeUiApi::class)
@@ -144,7 +153,15 @@ internal fun <T> EviloPredictiveBackHandler(enabled: Boolean, state: EviloBackTr
         { progress ->
             val startedKey = latestKey
             state.handle(progress, latestCurrent, latestPrevious,
-                isCurrent = { latestEnabled && latestKey == startedKey }, onBack = { latestOnBack() })
+                isCurrent = { latestEnabled && latestKey == startedKey }, onBack = { latestOnBack() },
+                awaitNavigation = {
+                    // Keep the preview mounted until collection observes the real destination.
+                    // A blocked Back must not leave input disabled indefinitely.
+                    withTimeoutOrNull(1_000) {
+                        snapshotFlow { latestKey }.first { it != startedKey }
+                        withFrameNanos { }
+                    }
+                })
         }
     }
     if (!LocalInspectionMode.current) PredictiveBackHandler(enabled = enabled, onBack = remember(handler) {

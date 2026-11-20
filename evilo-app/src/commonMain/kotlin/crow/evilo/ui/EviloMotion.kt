@@ -47,12 +47,13 @@ import androidx.compose.ui.unit.dp
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 internal object EviloMotion {
-    const val PageDurationMillis = 280
-    const val ComponentDurationMillis = 180
-    const val ExitDurationMillis = 120
-    const val SlowDurationMillis = 360
+    const val PageDurationMillis = 320
+    const val ComponentDurationMillis = 220
+    const val ExitDurationMillis = 180
+    const val SlowDurationMillis = 420
     const val ToastDurationMillis = 5_000L
-    val Easing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
+    val Easing = CubicBezierEasing(0.25f, 0.1f, 0.25f, 1f)
+    val SettleEasing = CubicBezierEasing(0.16f, 0f, 0.12f, 1f)
 
     fun <T> spatialSpec(): TweenSpec<T> = tween(PageDurationMillis, easing = Easing)
     fun <T> componentSpec(): TweenSpec<T> = tween(ComponentDurationMillis, easing = Easing)
@@ -81,34 +82,52 @@ internal fun <T> EviloPageTransition(
     content: @Composable (T) -> Unit,
 ) {
     val parentActive = LocalEviloPageActive.current
-    val distance = with(LocalDensity.current) { EviloSpacing.ExtraLarge.roundToPx() }
+    val distance = with(LocalDensity.current) { 32.dp.roundToPx() }
     val layoutDirection = if (LocalLayoutDirection.current == LayoutDirection.Ltr) 1 else -1
-    val localState = remember { SeekableTransitionState(targetState) }
+    val payloads = remember { EviloTransitionPayloadCache(targetState, contentKey) }
+    val target = backState?.target(targetState) ?: payloads.target(targetState)
+    val localState = remember { SeekableTransitionState(target) }
     val transitionState = backState?.transition ?: localState
     val previewing = backState?.previewing == true
     val transition = rememberTransition(transitionState, label)
-    LaunchedEffect(targetState, previewing) {
-        if (!previewing) transitionState.animateTo(targetState)
+    LaunchedEffect(target, previewing) {
+        if (!previewing) {
+            if (transitionState.currentState.key == target.key) transitionState.snapTo(target)
+            else transitionState.animateTo(target)
+        }
     }
     transition.AnimatedContent(
         modifier = modifier.fillMaxSize().clipToBounds(),
-        contentKey = contentKey,
+        contentKey = { it.key },
         transitionSpec = {
-            val change = depth(this.targetState).compareTo(depth(initialState))
+            val change = depth(this.targetState.value).compareTo(depth(initialState.value))
             val transform = when {
-                previewing -> (fadeIn(tween(EviloPredictiveMotion.CommitMillis, easing = EviloPredictiveMotion.emphasized), initialAlpha = 0.9999f) togetherWith
+                // A near-opaque enter keeps a seekable timeline without moving the destination.
+                // The graphics layer below owns the outgoing page's gesture motion.
+                previewing -> (fadeIn(tween(EviloPredictiveMotion.CommitMillis), initialAlpha = 0.9999f) togetherWith
                     ExitTransition.KeepUntilTransitionsFinished).apply { targetContentZIndex = -1f }
-                contentKey(initialState) == contentKey(this.targetState) -> EnterTransition.None togetherWith ExitTransition.None
-                change == 0 -> fadeIn(EviloMotion.spatialSpec()) togetherWith fadeOut(EviloMotion.exitSpec())
+                initialState.key == this.targetState.key -> EnterTransition.None togetherWith ExitTransition.None
+                change == 0 -> fadeIn(EviloMotion.spatialSpec()) togetherWith
+                    (fadeOut(EviloMotion.spatialSpec()) + ExitTransition.KeepUntilTransitionsFinished)
+                change > 0 -> {
+                    ((fadeIn(EviloMotion.spatialSpec(), initialAlpha = 0.92f) +
+                        slideInHorizontally(EviloMotion.spatialSpec()) { layoutDirection * distance }) togetherWith
+                        (slideOutHorizontally(EviloMotion.spatialSpec()) { -layoutDirection * distance / 4 } +
+                            ExitTransition.KeepUntilTransitionsFinished))
+                        .apply { targetContentZIndex = 1f }
+                }
                 else -> {
-                    val direction = change * layoutDirection
-                    (fadeIn(EviloMotion.spatialSpec()) + slideInHorizontally(EviloMotion.spatialSpec()) { direction * distance }) togetherWith
-                        (fadeOut(EviloMotion.exitSpec()) + slideOutHorizontally(EviloMotion.spatialSpec()) { -direction * distance / 3 })
+                    (slideInHorizontally(EviloMotion.spatialSpec()) { -layoutDirection * distance / 4 } togetherWith
+                        (fadeOut(EviloMotion.spatialSpec()) +
+                            slideOutHorizontally(EviloMotion.spatialSpec()) { layoutDirection * distance } +
+                            ExitTransition.KeepUntilTransitionsFinished))
+                        .apply { targetContentZIndex = -1f }
                 }
             }
             transform.using(null)
         },
-    ) { displayed ->
+    ) { payload ->
+        val displayed = payload.value
         val active = parentActive && !previewing && contentKey(displayed) == contentKey(targetState)
         CompositionLocalProvider(LocalEviloPageActive provides active) {
             val density = LocalDensity.current.density
@@ -120,9 +139,8 @@ internal fun <T> EviloPageTransition(
                         backState.event.fromRight, size.width, size.height, density, backState.commitFraction)
                     scaleX = motion.scale
                     scaleY = motion.scale
-                    // Flutter scales the translated child, so scale its offset as well.
-                    translationX = motion.x * motion.scale
-                    translationY = motion.y * motion.scale
+                    translationX = motion.x
+                    translationY = motion.y
                     alpha = motion.alpha
                     shape = RoundedCornerShape((motion.radius / density).dp)
                     clip = true
@@ -145,23 +163,38 @@ internal fun <T> EviloContentTransition(
     modifier: Modifier = Modifier,
     contentKey: (T) -> Any? = { it },
     label: String = "content",
+    direction: (T, T) -> Int = { _, _ -> 0 },
     content: @Composable (T) -> Unit,
 ) {
     val parentActive = LocalEviloPageActive.current
+    val distance = with(LocalDensity.current) { 20.dp.roundToPx() }
+    val layoutDirection = if (LocalLayoutDirection.current == LayoutDirection.Ltr) 1 else -1
+    val payloads = remember { EviloTransitionPayloadCache(targetState, contentKey) }
     AnimatedContent(
-        targetState = targetState,
-        modifier = modifier,
-        contentKey = contentKey,
+        targetState = payloads.target(targetState),
+        modifier = modifier.clipToBounds(),
+        contentKey = { it.key },
         label = label,
         transitionSpec = {
-            val transform = if (contentKey(initialState) == contentKey(targetState)) EnterTransition.None togetherWith ExitTransition.None
-                else fadeIn(EviloMotion.componentSpec()) togetherWith fadeOut(EviloMotion.exitSpec())
+            val slideDirection = direction(initialState.value, this.targetState.value).coerceIn(-1, 1) * layoutDirection
+            val transform = when {
+                initialState.key == this.targetState.key -> EnterTransition.None togetherWith ExitTransition.None
+                slideDirection == 0 -> fadeIn(EviloMotion.componentSpec()) togetherWith
+                    (fadeOut(EviloMotion.componentSpec()) + ExitTransition.KeepUntilTransitionsFinished)
+                else -> (fadeIn(EviloMotion.componentSpec()) +
+                    slideInHorizontally(EviloMotion.componentSpec()) { slideDirection * distance }) togetherWith
+                    (fadeOut(EviloMotion.componentSpec()) +
+                        slideOutHorizontally(EviloMotion.componentSpec()) { -slideDirection * distance } +
+                        ExitTransition.KeepUntilTransitionsFinished)
+            }
             transform.using(null)
         },
-    ) { displayed ->
+    ) { payload ->
+        val displayed = payload.value
         val active = parentActive && contentKey(displayed) == contentKey(targetState)
         CompositionLocalProvider(LocalEviloPageActive provides active) {
-            Box(Modifier.eviloTransitionInput(active)) { content(displayed) }
+            // Fade the surface with its content instead of drawing two sets of text together.
+            Box(Modifier.background(MaterialTheme.colorScheme.background).eviloTransitionInput(active)) { content(displayed) }
         }
     }
 }
