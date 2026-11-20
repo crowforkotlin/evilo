@@ -51,7 +51,7 @@
     <string name="plugin_details">Plugin Details</string>
     <string name="plugin_settings">Plugin Settings</string>
     <string name="plugin_settings_for">Settings for %1$s</string>
-    <string name="plugin_installed_version">Installed %1$s</string>
+    <string name="plugin_installed_version">Installed version: %1$s</string>
     <string name="plugin_already_installed">This version is installed. Tap the plugin row to open it.</string>
     <string name="plugin_release_changed">This release was removed or changed. Select it again from Plugin Details.</string>
     <string name="plugin_source_code">Source Code</string>
@@ -78,7 +78,6 @@
     <string name="source_remove">Remove</string>
     <string name="source_remove_title">Remove this source?</string>
     <string name="source_remove_description">The subscription and its installations are removed. Private plugin data is retained.</string>
-    <string name="source_cached">Showing cached catalog</string>
     <string name="more_installed">Installed Plugins</string>
     <string name="more_heading">Make it yours</string>
     <string name="more_description">Manage your sources, content preferences, and installed plugins in one place.</string>
@@ -302,7 +301,6 @@
     <string name="image_error_redirect_hint">Redirects are not followed. The plugin must return the final approved image address.</string>
     <string name="image_error_byte_limit">Compressed byte limit: %1$d</string>
     <string name="image_error_dimension_limit">Dimension limit: %1$d pixels per side | %2$d total pixels</string>
-    <string name="plugin_availability_declared">Region labels are declared by the source author. They do not configure a proxy or guarantee access.</string>
     <string name="plugin_recommended_release">Recommended compatible release</string>
     <string name="plugin_view_source_copy">View this source copy</string>
     <string name="plugin_signer_official">Official signing identity (verified during installation)</string>
@@ -311,4 +309,19 @@
     <string name="plugin_manifest_hash">Signed manifest SHA-256: %1$s</string>
     <string name="plugin_publisher_warning">Source inclusion is not a safety review. This public key is supplied by the publisher; compare its fingerprint through an independent channel. Approval is only for this version, not future updates or another plugin.</string>
     <string name="plugin_publisher_accept">I accept this third-party signing identity and allow installation of this version.</string>
+    <string name="plugin_authors">Authors: %1$s</string>
+    <string name="plugin_package">Package: %1$s</string>
+    <string name="plugin_content_types">Content types: %1$s</string>
+    <string name="plugin_languages">Languages: %1$s</string>
+    <string name="plugin_installation">Installation</string>
+    <string name="plugin_source_name">Source: %1$s</string>
+    <string name="plugin_published_at">Published: %1$s</string>
+    <string name="plugin_version_code">Version code: %1$d</string>
+    <string name="plugin_selected_version">Selected version: %1$s</string>
+    <string name="plugin_uninstall_source_name">Uninstall the copy from %1$s</string>
+    <string name="source_catalog_for">Open the catalog from %1$s</string>
+    <string name="source_installed_count">%1$d installed</string>
+    <string name="source_remove_action">Remove source</string>
+    <string name="source_check_failed">Plugin source check failed</string>
+    <string name="source_check_retry_hint">The source could not be read. Enable it if needed, then check for updates again.</string>
 </resources>

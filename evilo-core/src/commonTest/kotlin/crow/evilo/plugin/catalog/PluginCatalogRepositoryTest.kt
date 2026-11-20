@@ -125,6 +125,20 @@ class PluginCatalogRepositoryTest {
     }
 
     @Test
+    fun defaultSourceCleanupDoesNotRemoveManuallyAddedGithubSources() = runTest {
+        val fixture = RepositoryFixture(pluginCatalog())
+        val autoUrl = "https://raw.githubusercontent.com/crowforkotlin/evilo/main/plugin-repository/plugin.json"
+        val manual = CatalogSubscription("source.manual", autoUrl)
+        try {
+            fixture.records.write(CatalogWrite(subscriptions = listOf(manual),
+                cachedCatalogs = mapOf(manual.id to PluginJson.encodeToString(fixture.bundled))))
+            fixture.repository.initialize()
+            assertEquals(listOf(manual), fixture.repository.state.value.subscriptions)
+            assertEquals(1, fixture.repository.state.value.snapshots.size)
+        } finally { fixture.transport.close() }
+    }
+
+    @Test
     fun cancellationDuringCatalogCommitStillPublishesDurableState() = runTest {
         val records = ControlledCatalogStore()
         val fixture = RepositoryFixture(pluginCatalog(), records)
@@ -374,7 +388,7 @@ class PluginCatalogRepositoryTest {
     }
 
     @Test
-    fun legacyBundledRecordsMigrateWithoutLosingInstallationsCacheOrFloors() = runTest {
+    fun historicalAutomaticSourceIsRemovedWithoutLosingInstallationsOrPluginData() = runTest {
         val legacyCatalog = pluginCatalog().copy(id = "evilo.official", name = "evilo Official")
         val plugin = legacyCatalog.plugins.single()
         val installation = InstalledPlugin("official", LEGACY_BUNDLED_URL, plugin, plugin.latestRelease,
@@ -390,35 +404,22 @@ class PluginCatalogRepositoryTest {
             fixture.initialize(seedBundledCatalog = false)
             val state = fixture.repository.state.value
             val records = fixture.records.read()
-            val migrated = installation.copy(sourceId = BUNDLED_SOURCE_ID, sourceUrl = DEFAULT_BUNDLED_CATALOG_URL)
-            assertEquals(listOf(CatalogSubscription(BUNDLED_SOURCE_ID, DEFAULT_BUNDLED_CATALOG_URL, enabled = false)), state.subscriptions)
-            assertEquals(listOf(migrated), state.installed)
+            assertTrue(state.subscriptions.isEmpty())
+            assertTrue(state.snapshots.isEmpty())
+            assertEquals(listOf(installation), state.installed)
             assertEquals(state.installed, records.installed)
-            assertEquals(mapOf("$BUNDLED_SOURCE_ID:${plugin.id}" to 2L), records.updateFloors)
-            assertEquals(setOf(BUNDLED_SOURCE_ID), records.cachedCatalogs.keys)
-            val cached = PluginJson.decodeFromString<PluginCatalog>(records.cachedCatalogs.getValue(BUNDLED_SOURCE_ID))
-            assertEquals(listOf(plugin), cached.plugins)
-            assertEquals(legacyCatalog, cached)
+            assertTrue(records.updateFloors.isEmpty())
+            assertTrue(records.cachedCatalogs.isEmpty())
             assertEquals("retained", fixture.readPluginValue(plugin.id))
+            assertEquals(PluginBlockCode.SOURCE_MISSING, fixture.repository.installationBlock(installation)?.code)
 
             val reopened = PluginCatalogRepository(fixture.records, fixture.preferences, fixture.transport, fixture.host)
             reopened.initialize()
-            assertEquals(listOf(migrated), reopened.state.value.installed)
-            assertFalse(reopened.state.value.subscriptions.single().enabled)
-            reopened.setSourceEnabled(BUNDLED_SOURCE_ID, true)
-            assertTrue(reopened.installationBlockReason(migrated).orEmpty().contains("mandatory"))
-            reopened.removeSource(BUNDLED_SOURCE_ID)
-            assertTrue(fixture.records.read().subscriptions.isEmpty())
-            assertTrue(fixture.records.read().cachedCatalogs.isEmpty())
-            assertTrue(fixture.records.read().installed.isEmpty())
-            assertTrue(fixture.records.read().updateFloors.isEmpty())
+            reopened.refresh()
+            assertEquals(listOf(installation), reopened.state.value.installed)
+            assertTrue(reopened.state.value.subscriptions.isEmpty())
+            assertTrue(fixture.requests.isEmpty())
             assertEquals("retained", fixture.readPluginValue(plugin.id))
-
-            val afterRemoval = PluginCatalogRepository(fixture.records, fixture.preferences, fixture.transport, fixture.host)
-            afterRemoval.initialize()
-            assertTrue(afterRemoval.state.value.subscriptions.isEmpty())
-            assertTrue(afterRemoval.state.value.snapshots.isEmpty())
-            assertTrue(afterRemoval.state.value.installed.isEmpty())
         } finally {
             fixture.transport.close()
         }
@@ -782,7 +783,7 @@ class PluginCatalogRepositoryTest {
             requestTimeoutMillis = 0)
         val repository = PluginCatalogRepository(records, preferences, transport, host)
         suspend fun initialize(seedBundledCatalog: Boolean = true) {
-            // This source is explicit test data, not a production startup default.
+            // An explicit fixture URL cannot be mistaken for the historical default.
             val stored = records.read()
             if (seedBundledCatalog && stored.subscriptions.none { it.id == BUNDLED_SOURCE_ID || it.id == "official" }) {
                 records.write(CatalogWrite(
@@ -815,6 +816,7 @@ class PluginCatalogRepositoryTest {
     }
 
     private companion object {
+        const val DEFAULT_BUNDLED_CATALOG_URL = "https://catalog.example.com/test-fixture.json"
         const val CUSTOM_URL = "https://catalog.example.com/plugins.json"
         const val LEGACY_BUNDLED_URL =
             "https://raw.githubusercontent.com/crowforkotlin/evilo/main/plugin-repository/official.json"

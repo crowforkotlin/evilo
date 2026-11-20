@@ -89,7 +89,7 @@ be bypassed with Wasm.
 
 Read [the catalog contract](../../../docs/plugin-catalog.md) for metadata and
 release changes. Publishers may host their own catalog without a PR to evilo;
-`plugin-repository/plugin.json` is only the bundled source. Filenames and `.json`
+`plugin-repository/plugin.json` is historical metadata, not a startup source. Filenames and `.json`
 suffixes are not required. The public format needs no separate JSON Schema.
 
 Keep common kinds, languages, source URL, permissions, and protocol declarations
@@ -109,10 +109,11 @@ Sources may declare publisher public keys, but declarations never grant trust.
 Third-party signed releases require explicit version/fingerprint/permission approval
 and a pinned signed manifest; retain the official-key fallback for legacy catalogs. Changing
 common defaults must not silently alter approved installation permissions.
-The built-in subscription can be disabled, not removed. Every mandatory version
-floor is scoped to its subscription, including the built-in one. Preserve the
-existing Room record migration when renaming bundled source IDs or URLs; do not
-discard caches, installation timestamps, disabled state, or plugin KV.
+Startup never supplies a default subscription. Remove only the known historical
+automatic source ID-and-URL pairs and their catalog cache/floors; retain historical
+installations, approved manifests, timestamps, and plugin KV. User-added sources
+on the same host remain. Every mandatory version floor is scoped to its subscription.
+Preserve custom historical source-ID migration without discarding user data.
 
 ## Configuration and platform work
 

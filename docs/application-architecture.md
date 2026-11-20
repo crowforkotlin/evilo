@@ -54,10 +54,16 @@ Initialization loads Room records, retries pending plugin-data deletions, reads
 preferences, and restores only stored subscriptions, cached catalogs, and
 installations. Fresh storage has zero sources and plugins; startup never adds a
 default source or catalog. Non-preview startup then dispatches
-`PluginHomeIntent.Refresh`, which fetches only enabled stored sources and makes no
-requests when there are none. Compose previews use explicit memory
+`PluginHomeIntent.RefreshInstalled`, which checks enabled sources needed by stored
+installations and makes no requests when there are no installations. Explicit
+source refresh remains available through `PluginHomeIntent.Refresh`. Compose previews use explicit memory
 stores; production startup never silently switches to them after an error.
-Startup failures show their message and a retry action.
+Startup failures show their message and a retry action. `AppStartupSurface` stays
+mounted while storage/environment and required web fonts load, then fades out
+without a fixed delay. Android's native Core SplashScreen and iOS's launch storyboard
+precede this common surface; desktop uses the common surface in its existing
+window, and web uses matching HTML until Compose is ready. Pending Android LAN
+permission uses `AppStartup()` without opening storage or starting requests.
 
 One supervisor scope belongs to the environment. Normal disposal attempts every
 step in order: home store, connection controller, Coil, HTTP transport, app scope,
@@ -178,11 +184,15 @@ from its own current connection value rather than briefly reusing the absent
 session's disconnected value. Genuine scope closure still shows Reopen.
 Loading failures remain on that page with a centered Reload action; connected
 catalogs additionally support pull-to-refresh. Catalog operations choose exactly
-one indicator location (center, pagination footer, or pull-refresh top); failures
-remove loading immediately, and the home progress bar stays hidden on this route.
+one indicator location (center, pagination footer, or pull-refresh top). An observed
+content load remains presented for at least 400ms before showing success/failure;
+this does not delay network operations or cancellation. Loading/error states
+crossfade, and the home progress bar stays hidden on this route.
 `SharedTransitionLayout` surrounds the media page transition; its page visibility
 scope connects catalog/detail cover bounds. Sharing matches image scope, media ID,
-and URL, and is disabled during predictive previews to retain full-page geometry.
+and URL. Details-to-catalog predictive Back seeks that same transition with gesture
+progress and settles/cancels its cover geometry without replaying the forward
+animation. Other predictive destinations retain the full-page geometry.
 The image still loads through the approved Coil request path; cached covers avoid
 another fade. First results and reader responses fade in once; keyed lazy-item
 animations handle pagination and chapter arrival without replaying during scroll.
@@ -276,13 +286,14 @@ deletions. Version codes are indexed as decimal text because the current SQLite
 Web driver transports numbers through JavaScript doubles; installation JSON is
 checked against its indexed identity and version.
 
-`PluginCatalogRepository.initialize()` retains existing sources and installations.
-Only stored historical `official` records are migrated to the `bundled` source ID
-and its successor URL, cache key, installation source fields, and scoped floor keys.
-Cached catalog metadata, installation release/time, disabled state, and plugin KV
-are retained. Historical automatically subscribed sources are ordinary removable
-sources; removing one never causes startup to add it again. No subscription or
-catalog is seeded. This is not a migration from the removed JSON/localStorage
+`PluginCatalogRepository.initialize()` retains user-added sources and installations.
+It removes the known historical automatically subscribed `official`/`bundled`
+ID-and-URL pairs and their cached catalogs/floors. A user-added source on the same
+GitHub host is not removed. Historical installations, approved manifests, timestamps,
+and plugin KV remain; orphaned installations require a source to be added again
+or explicit removal from installation management. Custom historical `official`
+records still migrate their source ID/cache key without losing data. No subscription
+or catalog is seeded. This is not a migration from the removed JSON/localStorage
 storage implementations.
 
 `PluginCatalogRepository` validates catalog/release metadata before mutations.

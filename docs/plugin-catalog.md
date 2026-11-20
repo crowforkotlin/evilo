@@ -297,7 +297,8 @@ content type. It never falls back below a known mandatory floor. Version floors
 are persisted and cannot be lowered by a later catalog refresh. Every source's
 floor is scoped to that subscription; it cannot block another source's copy of
 the same signed plugin ID. Disabling a source retains its floors. Every source
-can be removed, including historical automatically subscribed sources retained
-from earlier app versions. Removing a source removes its scoped floor, cache, and
+can be removed. Startup also removes the known historical automatic source
+ID-and-URL pairs, retaining their installations/KV for explicit management; manually
+added sources on the same host remain. Removing a source removes its scoped floor, cache, and
 installations; plugin data is retained. Install/update still requires explicit
 release review.

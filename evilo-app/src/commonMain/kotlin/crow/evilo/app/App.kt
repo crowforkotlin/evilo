@@ -1,13 +1,23 @@
 package crow.evilo.app
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -22,12 +32,18 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalInspectionMode
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
 import coil3.compose.LocalPlatformContext
 import crow.evilo.app.resources.Res
 import crow.evilo.app.resources.app_loading
 import crow.evilo.app.resources.app_retry
 import crow.evilo.feature.browse.PluginHome
 import crow.evilo.feature.browse.PluginHomeIntent
+import crow.evilo.ui.EviloLayout
+import crow.evilo.ui.EviloMotion
 import crow.evilo.ui.EviloSpacing
 import crow.evilo.ui.EviloTheme
 import kotlinx.coroutines.CancellationException
@@ -42,7 +58,7 @@ import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.KoinIsolatedContext
 
 @Composable
-fun App(debugDiagnostics: Boolean = platformDebugDiagnostics()) {
+fun App(debugDiagnostics: Boolean = platformDebugDiagnostics(), contentReady: Boolean = true) {
     val inspection = LocalInspectionMode.current
     val factory = if (inspection) remember { AppStorageFactory { AppStorage.preview() } } else rememberAppStorageFactory()
     val context = LocalPlatformContext.current
@@ -86,18 +102,54 @@ fun App(debugDiagnostics: Boolean = platformDebugDiagnostics()) {
             Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(MaterialTheme.colorScheme.surfaceContainerLow,
                 MaterialTheme.colorScheme.background)))) {
                 val ready = environment
-                if (ready != null) CompositionLocalProvider(LocalAppDiagnostics provides debugDiagnostics) {
+                val showApp = ready != null && contentReady
+                val splash = remember { MutableTransitionState(true) }
+                splash.targetState = !showApp
+                // Never retain a closed environment in an outgoing AnimatedContent snapshot.
+                if (ready != null && showApp) CompositionLocalProvider(LocalAppDiagnostics provides debugDiagnostics) {
                     KoinIsolatedContext(ready.koin) { PluginHome() }
                 }
-                else Column(Modifier.fillMaxSize().padding(EviloSpacing.ExtraLarge), horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(EviloSpacing.Large, Alignment.CenterVertically)) {
-                    if (startupError == null) {
-                        CircularProgressIndicator()
-                        Text(stringResource(Res.string.app_loading))
-                    } else {
-                        Text(startupError.orEmpty(), color = MaterialTheme.colorScheme.error)
-                        Button(onClick = { attempt++ }) { Text(stringResource(Res.string.app_retry)) }
-                    }
+                AnimatedVisibility(
+                    visibleState = splash,
+                    modifier = Modifier.fillMaxSize(),
+                    enter = EnterTransition.None,
+                    exit = fadeOut(EviloMotion.componentSpec()),
+                ) {
+                    AppStartupSurface(error = startupError, onRetry = {
+                        startupError = null
+                        attempt++
+                    })
+                }
+            }
+        }
+    }
+}
+
+/** Also used before Android permission resolution; this surface opens no app resources. */
+@Composable
+fun AppStartup() {
+    EviloTheme { AppStartupSurface() }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun AppStartupSurface(error: String? = null, onRetry: () -> Unit = {}) {
+    val colors = MaterialTheme.colorScheme
+    Surface(Modifier.fillMaxSize(), color = colors.background, contentColor = colors.onBackground) {
+        Box(Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState())
+            .padding(EviloSpacing.ExtraLarge), contentAlignment = Alignment.Center) {
+            Column(Modifier.widthIn(max = EviloLayout.PageStateMaxWidth), horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(EviloSpacing.ExtraLarge)) {
+                Text("evilo", style = MaterialTheme.typography.displayMedium, color = colors.primary)
+                if (error == null) {
+                    LoadingIndicator(Modifier.size(EviloLayout.LoadingIndicatorSize), color = colors.primary)
+                    Text(stringResource(Res.string.app_loading), style = MaterialTheme.typography.bodyMedium,
+                        color = colors.onSurfaceVariant, textAlign = TextAlign.Center,
+                        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+                } else {
+                    Text(error, style = MaterialTheme.typography.bodyMedium, color = colors.error,
+                        textAlign = TextAlign.Center, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+                    Button(onClick = onRetry) { Text(stringResource(Res.string.app_retry)) }
                 }
             }
         }

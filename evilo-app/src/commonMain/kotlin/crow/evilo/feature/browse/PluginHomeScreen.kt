@@ -406,6 +406,8 @@ private fun PluginBrowseScreen(state: PluginHomeState, images: EviloImages, disp
                         else dispatch(PluginHomeIntent.OpenPlugin(checkNotNull(row.installationKey), rememberSource = state.browseSourceId == null))
                     }
                     PluginRow(row.entry, images, enabled = enabled && !state.changing, nsfw = row.nsfw,
+                        modifier = Modifier.animateItem(fadeInSpec = EviloMotion.componentSpec(),
+                            placementSpec = EviloMotion.spatialSpec(), fadeOutSpec = EviloMotion.exitSpec()),
                         status = if (row.needsSourceChoice) stringResource(Res.string.plugin_choose_source) else null,
                         onOpen = onUse, onSettings = {
                             dispatch(PluginHomeIntent.ManagePlugin(row.entry.key, rememberSourceOnOpen = !row.needsSourceChoice && state.browseSourceId == null))
@@ -466,6 +468,9 @@ private fun InstalledPluginsScreen(state: PluginHomeState, images: EviloImages, 
                 Text(stringResource(Res.string.browse_source_group, sourceName(state, group.sourceId), group.entries.size), style = MaterialTheme.typography.titleMedium)
             }
             items(group.entries, key = { it.key }) { entry -> PluginRow(entry, images, !state.changing, compact = false,
+                nsfw = entry.plugin.nsfw || state.catalog.isPluginNsfw(entry.plugin.id),
+                modifier = Modifier.animateItem(fadeInSpec = EviloMotion.componentSpec(),
+                    placementSpec = EviloMotion.spatialSpec(), fadeOutSpec = EviloMotion.exitSpec()),
                 onOpen = { dispatch(PluginHomeIntent.ManagePlugin(entry.key)) }, onSettings = { dispatch(PluginHomeIntent.ManagePlugin(entry.key)) }) }
         }
         if (projection.groups.isEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
@@ -484,13 +489,13 @@ private fun InstalledPluginsScreen(state: PluginHomeState, images: EviloImages, 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun PluginRow(entry: PluginEntry, images: EviloImages, enabled: Boolean, onOpen: () -> Unit, onSettings: () -> Unit,
-    compact: Boolean = true, nsfw: Boolean = entry.plugin.nsfw, status: String? = null) {
+    compact: Boolean = true, nsfw: Boolean = entry.plugin.nsfw, status: String? = null, modifier: Modifier = Modifier) {
     val plugin = entry.plugin
     val colors = MaterialTheme.colorScheme
     val nameLines = if (LocalDensity.current.fontScale > 1.2f) 2 else 1
-    val languages = if (compact) entry.installation?.release?.languages ?: plugin.languages else plugin.languages
+    val languages = entry.installation?.release?.languages ?: plugin.languages
     val update = entry.installation?.let { installed -> entry.recommended?.versionCode?.let { it > installed.release.versionCode } } == true
-    Card(onClick = onOpen, enabled = enabled, shape = MaterialTheme.shapes.large,
+    Card(onClick = onOpen, enabled = enabled, modifier = modifier, shape = MaterialTheme.shapes.large,
         border = BorderStroke(EviloLayout.BorderWidth, colors.outlineVariant), elevation = CardDefaults.cardElevation(defaultElevation = EviloElevation.Flat),
         colors = CardDefaults.cardColors(containerColor = colors.surface, disabledContainerColor = colors.surface)) {
         Column(Modifier.fillMaxWidth().padding(EviloSpacing.Large), verticalArrangement = Arrangement.spacedBy(EviloSpacing.Small)) {
@@ -509,11 +514,9 @@ internal fun PluginRow(entry: PluginEntry, images: EviloImages, enabled: Boolean
                     Icon(EviloIcons.Info, stringResource(Res.string.plugin_about_for, plugin.name), tint = colors.onSurfaceVariant)
                 }
             }
-            if (!compact) {
-                Text(plugin.description, style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(entry.installation?.let { stringResource(Res.string.plugin_installed_version, it.release.version) } ?: stringResource(Res.string.plugin_not_installed),
-                    style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant)
-            }
+            if (!compact) Text(plugin.description, style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(entry.installation?.let { stringResource(Res.string.plugin_installed_version, it.release.version) } ?: stringResource(Res.string.plugin_not_installed),
+                style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant)
             (status ?: pluginBlockLabel(entry.openBlock))?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = colors.error, maxLines = 2, overflow = TextOverflow.Ellipsis) }
         }
     }

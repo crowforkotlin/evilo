@@ -51,7 +51,7 @@
     <string name="plugin_details">插件详情</string>
     <string name="plugin_settings">插件设置</string>
     <string name="plugin_settings_for">%1$s 的设置</string>
-    <string name="plugin_installed_version">已安装 %1$s</string>
+    <string name="plugin_installed_version">已安装版本：%1$s</string>
     <string name="plugin_already_installed">此版本已安装，点击插件条目即可进入。</string>
     <string name="plugin_release_changed">此版本已被删除或修改，请在插件详情中重新选择。</string>
     <string name="plugin_source_code">源代码</string>
@@ -78,7 +78,6 @@
     <string name="source_remove">移除</string>
     <string name="source_remove_title">移除此插件源？</string>
     <string name="source_remove_description">会移除订阅和该源的插件安装记录，保留插件独立存储数据。</string>
-    <string name="source_cached">正在显示缓存的列表</string>
     <string name="more_installed">已安装插件</string>
     <string name="more_heading">你的使用空间</string>
     <string name="more_description">集中管理插件源、内容偏好和已安装插件。</string>
@@ -302,7 +301,6 @@
     <string name="image_error_redirect_hint">应用不跟随图片跳转，插件需要返回最终已获批准的图片地址。</string>
     <string name="image_error_byte_limit">压缩数据字节上限：%1$d</string>
     <string name="image_error_dimension_limit">单边尺寸上限：%1$d 像素；总像素上限：%2$d</string>
-    <string name="plugin_availability_declared">地区标签来自来源作者声明，不会自动设置代理，也不保证当前网络可以访问。</string>
     <string name="plugin_recommended_release">推荐的兼容版本</string>
     <string name="plugin_view_source_copy">查看此来源副本</string>
     <string name="plugin_signer_official">官方签名身份（安装时验证）</string>
@@ -311,4 +309,19 @@
     <string name="plugin_manifest_hash">签名清单 SHA-256：%1$s</string>
     <string name="plugin_publisher_warning">来源收录不等于安全审查。公钥由发布者提供，请通过独立渠道核对指纹。本次仅批准这个版本，不批准后续更新或其他插件。</string>
     <string name="plugin_publisher_accept">我接受此第三方签名身份，并允许安装这个版本。</string>
+    <string name="plugin_authors">作者：%1$s</string>
+    <string name="plugin_package">包名：%1$s</string>
+    <string name="plugin_content_types">内容类型：%1$s</string>
+    <string name="plugin_languages">语言：%1$s</string>
+    <string name="plugin_installation">安装信息</string>
+    <string name="plugin_source_name">插件源：%1$s</string>
+    <string name="plugin_published_at">发布日期：%1$s</string>
+    <string name="plugin_version_code">版本号：%1$d</string>
+    <string name="plugin_selected_version">所选版本：%1$s</string>
+    <string name="plugin_uninstall_source_name">卸载来自 %1$s 的安装副本</string>
+    <string name="source_catalog_for">打开 %1$s 的插件目录</string>
+    <string name="source_installed_count">已安装 %1$d 个</string>
+    <string name="source_remove_action">移除插件源</string>
+    <string name="source_check_failed">插件源检查失败</string>
+    <string name="source_check_retry_hint">未能读取此插件源。请先启用来源，再重新检查更新。</string>
 </resources>

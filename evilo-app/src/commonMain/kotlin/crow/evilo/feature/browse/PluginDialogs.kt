@@ -60,7 +60,7 @@ internal fun PluginReleaseReviewDialog(entry: PluginEntry, release: PluginReleas
                     Text(stringResource(Res.string.plugin_subscription_source), style = MaterialTheme.typography.titleSmall)
                     SelectionContainer { Text(entry.listing?.snapshot?.subscription?.url ?: installed?.sourceUrl.orEmpty(),
                         style = MaterialTheme.typography.bodySmall) }
-                    PluginSourceLinks(release.sourceUrl, release)
+                    PluginSourceLinks(release.sourceUrl, release, showReleaseArtifacts = true)
                     PluginSigningText(release, official)
                     if (!official) Row {
                         Checkbox(publisherApproved, onCheckedChange = { publisherApproved = it })
@@ -105,7 +105,7 @@ internal fun PluginSigningText(release: PluginRelease, official: Boolean) {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-internal fun PluginSourceLinks(sourceUrl: String, release: PluginRelease?) {
+internal fun PluginSourceLinks(sourceUrl: String, release: PluginRelease?, showReleaseArtifacts: Boolean = false) {
     val uri = LocalUriHandler.current
     val toasts = LocalEviloToastState.current
     val errorTitle = stringResource(Res.string.home_error)
@@ -114,16 +114,19 @@ internal fun PluginSourceLinks(sourceUrl: String, release: PluginRelease?) {
         catch (failure: Exception) { toasts.show((failure.message ?: failure.toString()).take(500), title = errorTitle, error = true) }
     }
     Column(verticalArrangement = Arrangement.spacedBy(EviloSpacing.Small)) {
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(EviloSpacing.Small), verticalArrangement = Arrangement.spacedBy(EviloSpacing.Small)) {
+        SelectionContainer { Text(sourceUrl, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(EviloSpacing.Small), verticalArrangement = Arrangement.spacedBy(EviloSpacing.Small)) {
             OutlinedButton(onClick = { open(sourceUrl) }) { Text(stringResource(Res.string.plugin_source_code)) }
-            release?.let { OutlinedButton(onClick = { open(it.sourceArchiveUrl) }) { Text(stringResource(Res.string.plugin_source_archive)) } }
+            if (showReleaseArtifacts) release?.let {
+                OutlinedButton(onClick = { open(it.sourceArchiveUrl) }) { Text(stringResource(Res.string.plugin_source_archive)) }
+            }
         }
         release?.let {
             SelectionContainer {
                 Column(verticalArrangement = Arrangement.spacedBy(EviloSpacing.Small)) {
                     Text(stringResource(Res.string.plugin_source_revision, it.sourceRevision), style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(stringResource(Res.string.plugin_source_hash, it.sourceArchiveSha256), style = MaterialTheme.typography.bodySmall,
+                    if (showReleaseArtifacts) Text(stringResource(Res.string.plugin_source_hash, it.sourceArchiveSha256), style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
@@ -136,8 +139,9 @@ internal fun SourceRemovalDialog(name: String, installations: Int, busy: Boolean
     AlertDialog(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surface,
         title = { Text(stringResource(Res.string.source_remove_title)) },
         text = { Text(stringResource(Res.string.source_remove_count_description, name, installations)) },
-        confirmButton = { TextButton(onClick = onConfirm, enabled = !busy,
-            colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) { Text(stringResource(Res.string.source_remove)) } },
+        confirmButton = { Button(onClick = onConfirm, enabled = !busy,
+            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error,
+                contentColor = MaterialTheme.colorScheme.onError)) { Text(stringResource(Res.string.source_remove_action)) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(Res.string.home_cancel)) } })
 }
 
@@ -146,7 +150,8 @@ internal fun PluginUninstallDialog(name: String, source: String, otherInstallati
     AlertDialog(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surface,
         title = { Text(stringResource(Res.string.plugin_uninstall_title, name)) },
         text = { Text(stringResource(Res.string.plugin_uninstall_source_description, source, otherInstallations)) },
-        confirmButton = { TextButton(onClick = onConfirm, enabled = !busy,
-            colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) { Text(stringResource(Res.string.plugin_uninstall)) } },
+        confirmButton = { Button(onClick = onConfirm, enabled = !busy,
+            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error,
+                contentColor = MaterialTheme.colorScheme.onError)) { Text(stringResource(Res.string.plugin_uninstall)) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(Res.string.home_cancel)) } })
 }

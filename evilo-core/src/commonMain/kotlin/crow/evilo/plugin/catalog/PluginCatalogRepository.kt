@@ -87,8 +87,14 @@ class PluginCatalogRepository(
         if (mutableState.value.initialized) return@withLock
         val stored = records.read()
         cleanupPluginData(stored.pendingDataDeletes)
-        // Retain the historical source as an ordinary removable subscription, if it exists.
-        val subscriptions = stored.subscriptions.map { source ->
+        // Remove only the old automatically supplied source, never a manually added
+        // subscription that happens to use the same host. Retain approved installs/KV
+        // as orphaned records until the user supplies their source or removes them.
+        val removedDefaults = stored.subscriptions.filter { source ->
+            source.id in setOf(LEGACY_BUNDLED_SOURCE_ID, BUNDLED_SOURCE_ID) &&
+                source.url in setOf(LEGACY_BUNDLED_CATALOG_URL, DEFAULT_BUNDLED_CATALOG_URL)
+        }.map { it.id }.toSet()
+        val subscriptions = stored.subscriptions.filterNot { it.id in removedDefaults }.map { source ->
             if (source.id == LEGACY_BUNDLED_SOURCE_ID) source.copy(id = BUNDLED_SOURCE_ID, url = migrateBundledUrl(source.url))
             else source
         }
@@ -103,7 +109,8 @@ class PluginCatalogRepository(
             cachedJson?.let { CatalogSnapshot(source, parser.parse(it, source.allowHttp), fromCache = true) }
         } }
         val installed = stored.installed.map { installation ->
-            if (installation.sourceId == LEGACY_BUNDLED_SOURCE_ID)
+            if (installation.sourceId == LEGACY_BUNDLED_SOURCE_ID &&
+                stored.subscriptions.any { it.id == LEGACY_BUNDLED_SOURCE_ID && it.id !in removedDefaults })
                 installation.copy(sourceId = BUNDLED_SOURCE_ID, sourceUrl = migrateBundledUrl(installation.sourceUrl))
             else installation
         }
@@ -121,7 +128,7 @@ class PluginCatalogRepository(
         } }
         require(stored.updateFloors.values.all { it >= 1 }) { "Invalid stored mandatory version floors." }
         updateFloors = buildMap {
-            stored.updateFloors.forEach { (key, versionCode) ->
+            stored.updateFloors.filterKeys { key -> removedDefaults.none { key.startsWith("$it:") } }.forEach { (key, versionCode) ->
                 val migratedKey = if (key.startsWith("$LEGACY_BUNDLED_SOURCE_ID:")) "$BUNDLED_SOURCE_ID:${key.substringAfter(':')}" else key
                 put(migratedKey, maxOf(get(migratedKey) ?: 1, versionCode))
             }
@@ -133,10 +140,11 @@ class PluginCatalogRepository(
             preferences.currentSettings()
         } else storedSettings
         val floors = nextUpdateFloors(snapshots)
-        val migratedCache = if (legacyCache != null && BUNDLED_SOURCE_ID !in stored.cachedCatalogs)
+        val migratedCache = if (legacyCache != null && BUNDLED_SOURCE_ID !in stored.cachedCatalogs &&
+            subscriptions.any { it.id == BUNDLED_SOURCE_ID })
             mapOf(BUNDLED_SOURCE_ID to legacyCache) else emptyMap()
         persistAndPublish(CatalogWrite(subscriptions = subscriptions, cachedCatalogs = migratedCache,
-            removeCachedCatalogs = setOf(LEGACY_BUNDLED_SOURCE_ID), installed = installed.takeIf { it != stored.installed },
+            removeCachedCatalogs = removedDefaults + LEGACY_BUNDLED_SOURCE_ID, installed = installed.takeIf { it != stored.installed },
             updateFloors = floors)) {
             updateFloors = floors
             mutableState.value = PluginRepositoryState(true, subscriptions = subscriptions, snapshots = snapshots,

@@ -14,6 +14,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 
 class MainActivity : ComponentActivity() {
     private val appReady = mutableStateOf(false)
@@ -27,6 +28,8 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Native cold-launch splash ends at the first drawable Compose frame, not after a delay.
+        installSplashScreen()
         val darkTheme = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
         enableEdgeToEdge(
             navigationBarStyle = if (darkTheme) SystemBarStyle.dark(Color.TRANSPARENT)
@@ -42,7 +45,7 @@ class MainActivity : ComponentActivity() {
         appReady.value = !needsPermission || localNetworkPermissionHandled
 
         setContent {
-            if (appReady.value) App()
+            if (appReady.value) App() else AppStartup()
         }
         if (!appReady.value && !localNetworkPermissionPending) {
             localNetworkPermissionPending = true

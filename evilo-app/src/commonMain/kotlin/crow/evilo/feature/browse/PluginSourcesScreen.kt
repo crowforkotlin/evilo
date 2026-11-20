@@ -28,7 +28,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -68,6 +67,8 @@ internal fun PluginSourcesScreen(state: PluginHomeState, dispatch: (PluginHomeIn
             items(state.catalog.subscriptions, key = { it.id }) { source ->
                 val toggleDescription = stringResource(Res.string.source_toggle_for, sourceName(state, source.id))
                 Surface(onClick = { dispatch(PluginHomeIntent.ShowSourceCatalog(source.id)) },
+                    modifier = Modifier.animateItem(fadeInSpec = EviloMotion.componentSpec(),
+                        placementSpec = EviloMotion.spatialSpec(), fadeOutSpec = EviloMotion.exitSpec()),
                     shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surface,
                     border = BorderStroke(EviloLayout.BorderWidth, MaterialTheme.colorScheme.outlineVariant)) {
                     Column(Modifier.fillMaxWidth().animateContentSize(EviloMotion.componentSpec()).padding(EviloSpacing.Large),
@@ -85,9 +86,10 @@ internal fun PluginSourcesScreen(state: PluginHomeState, dispatch: (PluginHomeIn
                                     .semantics { contentDescription = toggleDescription })
                         }
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                            Text(stringResource(Res.string.source_install_counts,
-                                state.catalog.installed.count { it.sourceId == source.id },
-                                state.catalog.snapshots.firstOrNull { it.subscription.id == source.id }?.catalog?.plugins?.size ?: 0),
+                            val installedCount = state.catalog.installed.count { it.sourceId == source.id }
+                            val catalogCount = state.catalog.snapshots.firstOrNull { it.subscription.id == source.id }?.catalog?.plugins?.size
+                            Text(if (catalogCount == null) stringResource(Res.string.source_installed_count, installedCount)
+                                else stringResource(Res.string.source_install_counts, installedCount, catalogCount),
                                 Modifier.weight(1f), style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                             IconButton(onClick = { dispatch(PluginHomeIntent.ShowSourceSettings(source.id)) }) {
@@ -100,7 +102,7 @@ internal fun PluginSourcesScreen(state: PluginHomeState, dispatch: (PluginHomeIn
                     }
                 }
             }
-            item { OutlinedButton(onClick = { dispatch(PluginHomeIntent.ShowAddSource) }) {
+            item { OutlinedButton(onClick = { dispatch(PluginHomeIntent.ShowAddSource) }, modifier = Modifier.fillMaxWidth()) {
                 Icon(EviloIcons.Add, null, Modifier.size(EviloLayout.InlineIconSize))
                 Text(stringResource(Res.string.source_add_title), Modifier.padding(start = EviloSpacing.Small))
             } }
@@ -130,7 +132,7 @@ internal fun AddPluginSourceScreen(state: PluginHomeState, dispatch: (PluginHome
             Text(stringResource(Res.string.plugin_http_warning), color = MaterialTheme.colorScheme.error,
                 style = MaterialTheme.typography.bodyMedium)
         }
-        item { Button(onClick = { dispatch(PluginHomeIntent.AddSource(url.trim(), allowHttp)) }, enabled = state.canMutate &&
+        item { Button(onClick = { dispatch(PluginHomeIntent.AddSource(url.trim(), allowHttp)) }, modifier = Modifier.fillMaxWidth(), enabled = state.canMutate &&
             (url.trim().startsWith("https://") || (allowHttp && url.trim().startsWith("http://")))) {
             Text(stringResource(Res.string.source_add))
         } }
@@ -158,7 +160,7 @@ internal fun PluginSourceSettingsScreen(state: PluginHomeState, id: String, disp
             EviloSettingsGroup(stringResource(Res.string.plugin_subscription_source)) {
                 Column(Modifier.padding(EviloSpacing.Large), verticalArrangement = Arrangement.spacedBy(EviloSpacing.Medium)) {
                     SelectionContainer { Text(source.url, style = MaterialTheme.typography.bodyMedium) }
-                    OutlinedButton(onClick = { clipboard.setText(AnnotatedString(source.url)) }) { Text(stringResource(Res.string.source_copy_url)) }
+                    OutlinedButton(onClick = { clipboard.setText(AnnotatedString(source.url)) }, modifier = Modifier.fillMaxWidth()) { Text(stringResource(Res.string.source_copy_url)) }
                     if (source.allowHttp) Text(stringResource(Res.string.plugin_http_warning), color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodySmall)
                 }
@@ -166,21 +168,29 @@ internal fun PluginSourceSettingsScreen(state: PluginHomeState, id: String, disp
         }
         item {
             EviloSettingsGroup(stringResource(Res.string.source_check_updates)) {
-                Column(Modifier.padding(EviloSpacing.Large), verticalArrangement = Arrangement.spacedBy(EviloSpacing.Small)) {
+                Column(Modifier.animateContentSize(EviloMotion.componentSpec()).padding(EviloSpacing.Large), verticalArrangement = Arrangement.spacedBy(EviloSpacing.Small)) {
                     SourceCheckStatus(state, id, detailed = true)
                     snapshot?.let { Text(stringResource(Res.string.source_catalog_updated_at, it.catalog.updatedAt),
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                    OutlinedButton(onClick = { dispatch(PluginHomeIntent.RefreshSource(id)) }, enabled = source.enabled && !state.catalog.refreshing) {
+                    OutlinedButton(onClick = { dispatch(PluginHomeIntent.RefreshSource(id)) }, modifier = Modifier.fillMaxWidth(),
+                        enabled = source.enabled && !state.catalog.refreshing) {
                         Text(stringResource(Res.string.source_check_updates))
                     }
                 }
             }
         }
-        item { OutlinedButton(onClick = { dispatch(PluginHomeIntent.ShowSourceCatalog(id)) }) { Text(stringResource(Res.string.home_filter_all)) } }
+        item { OutlinedButton(onClick = { dispatch(PluginHomeIntent.ShowSourceCatalog(id)) }, modifier = Modifier.fillMaxWidth()) {
+            Text(stringResource(Res.string.home_filter_all))
+        } }
         item {
-            TextButton(onClick = { dispatch(PluginHomeIntent.RequestSourceRemoval(id)) }, enabled = state.canMutate,
-                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) {
-                Text(stringResource(Res.string.source_remove))
+            Column(verticalArrangement = Arrangement.spacedBy(EviloSpacing.Medium)) {
+                Text(stringResource(Res.string.source_remove_description), style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Button(onClick = { dispatch(PluginHomeIntent.RequestSourceRemoval(id)) }, enabled = state.canMutate,
+                    modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.onErrorContainer)) {
+                    Text(stringResource(Res.string.source_remove_action))
+                }
             }
         }
     }
@@ -192,10 +202,8 @@ internal fun SourceCheckStatus(state: PluginHomeState, id: String, detailed: Boo
     val snapshot = state.catalog.snapshots.firstOrNull { it.subscription.id == id }
     if (check?.running == true) Text(stringResource(Res.string.source_checking), style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.primary)
-    if (check?.usingCache == true || snapshot?.fromCache == true) Text(stringResource(Res.string.source_cached),
-        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    (check?.error ?: snapshot?.error)?.let { Text(it, style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.error, maxLines = if (detailed) Int.MAX_VALUE else 2, overflow = TextOverflow.Ellipsis) }
+    sourceCheckError(check, snapshot)?.let { Text(it, style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.error) }
     if (detailed) Text(check?.lastSuccessAt?.let { stringResource(Res.string.source_checked_at, it) }
         ?: stringResource(Res.string.source_never_checked), style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant)

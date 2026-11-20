@@ -4,7 +4,9 @@ import Evilo
 
 struct ComposeView: UIViewControllerRepresentable {
     func makeUIViewController(context: Self.Context) -> UIViewController {
-        MainViewControllerKt.MainViewController()
+        let controller = MainViewControllerKt.MainViewController()
+        controller.view.backgroundColor = UIColor(named: "StartupBackground")
+        return controller
     }
 
     func updateUIViewController(_ uiViewController: UIViewController, context: Self.Context) {}

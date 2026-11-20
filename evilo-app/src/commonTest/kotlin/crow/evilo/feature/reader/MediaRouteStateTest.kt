@@ -56,6 +56,23 @@ class MediaRouteStateTest {
     }
 
     @Test
+    fun loadingPresentationKeepsFourHundredMillisecondsWithoutExtendingSlowLoads() {
+        assertEquals(400L, mediaMinimumLoadingRemaining(0))
+        assertEquals(250L, mediaMinimumLoadingRemaining(150))
+        assertEquals(1L, mediaMinimumLoadingRemaining(399))
+        assertEquals(0L, mediaMinimumLoadingRemaining(400))
+        assertEquals(0L, mediaMinimumLoadingRemaining(900))
+    }
+
+    @Test
+    fun loadingErrorAndContentUseDifferentTransitionKeys() {
+        assertEquals(MediaLoadPhase.LOADING, mediaLoadPhase(true, null, false))
+        assertEquals(MediaLoadPhase.ERROR, mediaLoadPhase(false, "Request failed", false))
+        assertEquals(MediaLoadPhase.EMPTY, mediaLoadPhase(false, null, false))
+        assertEquals(MediaLoadPhase.CONTENT, mediaLoadPhase(false, null, true))
+    }
+
+    @Test
     fun sharedCoverMatchesOnlyTheSameScopeMediaAndArtwork() {
         val scope = Any()
         val cover = MediaCoverKey(scope, "plugin:manga:123", "https://images.example/123.jpg")

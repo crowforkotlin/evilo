@@ -1,5 +1,6 @@
 package crow.evilo.feature.reader
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.core.Animatable
@@ -93,6 +94,7 @@ import crow.evilo.ui.EviloElevation
 import crow.evilo.ui.EviloEmptyState
 import crow.evilo.ui.EviloLoadingState
 import crow.evilo.ui.EviloMotion
+import crow.evilo.ui.EviloContentTransition
 import crow.evilo.ui.LocalEviloAnimatedVisibilityScope
 import crow.evilo.ui.EviloRetryState
 import crow.evilo.ui.EviloIcons
@@ -106,6 +108,8 @@ import crow.evilo.ui.LocalEviloPageActive
 import crow.evilo.ui.LocalEviloToastState
 import crow.evilo.app.resources.*
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.delay
+import kotlin.time.TimeSource
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
@@ -125,7 +129,8 @@ fun MediaBrowserRoute(session: MediaSourceSession?, kind: MediaKind, onClose: ()
     val images = remember(session, imageLoader) { session?.let(imageLoader::sessionImages) }
     val stateFlow = remember(controller, kind) { controller?.state ?: MutableStateFlow(MediaBrowserState(kind, busy = connecting)) }
     val observed by key(controller, kind) { stateFlow.collectAsState() }
-    val state = mediaRouteState(observed, kind, sessionReady = session != null, connecting = connecting, connectionError = connectionError)
+    val rawState = mediaRouteState(observed, kind, sessionReady = session != null, connecting = connecting, connectionError = connectionError)
+    val state = rememberMediaLoadingPresentation(rawState, controller ?: kind)
     val connectedFlow = remember(images) { images?.connected ?: MutableStateFlow(false) }
     // A replacement scope must start from its own current value, not the previous
     // nullable scope's false retained by collectAsState across a flow replacement.
@@ -143,7 +148,10 @@ fun MediaBrowserRoute(session: MediaSourceSession?, kind: MediaKind, onClose: ()
     val back: () -> Unit = { if (!connected || state.page == MediaBrowserPage.CATALOG) onClose() else controller?.dispatch(MediaBrowserIntent.Back) }
     // Catalog/disconnected Back belongs to the home stack, which can preview its real destination.
     EviloPredictiveBackHandler((pageActive || backTransition.previewing) && connected && state.page != MediaBrowserPage.CATALOG && !showLoadDiagnostics,
-        backTransition, state, state.backDestination(), navigationKey = mediaPageKey(state), onBack = back)
+        backTransition, state, state.backDestination(), navigationKey = mediaPageKey(state), onBack = back,
+        sharedElements = state.page == MediaBrowserPage.DETAILS && state.selectedItem?.let { selected ->
+            !selected.coverUrl.isNullOrBlank() && state.items.any { it.id == selected.id && it.coverUrl == selected.coverUrl }
+        } == true)
     LaunchedEffect(controller, state.page, pageActive, backTransition.previewing) {
         if (pageActive && !backTransition.previewing) focus.requestFocus()
     }
@@ -223,10 +231,10 @@ fun MediaBrowserRoute(session: MediaSourceSession?, kind: MediaKind, onClose: ()
                                     onMore = { controller.dispatch(MediaBrowserIntent.LoadMore) },
                                     onItem = { controller.dispatch(MediaBrowserIntent.OpenItem(it)) }, pagePadding = pagePadding,
                                     onPluginDetails = onPluginDetails, onRetry = retry,
-                                    coverTransitions = coverTransitions, shareCovers = !backTransition.previewing)
+                                    coverTransitions = coverTransitions, shareCovers = !backTransition.previewing || backTransition.seekSharedElements)
                                 MediaBrowserPage.DETAILS -> MediaDetails(displayed, images,
                                     { controller.dispatch(MediaBrowserIntent.OpenChapter(it)) }, pagePadding, onPluginDetails, retry,
-                                    coverTransitions = coverTransitions, shareCovers = !backTransition.previewing)
+                                    coverTransitions = coverTransitions, shareCovers = !backTransition.previewing || backTransition.seekSharedElements)
                                 MediaBrowserPage.READER -> MediaReader(displayed, session, images,
                                     { controller.dispatch(MediaBrowserIntent.OpenChapter(it)) }, pagePadding, onPluginDetails, retry)
                             }
@@ -264,6 +272,29 @@ private fun MediaCatalogSearch(query: String, onQuery: (String) -> Unit, onSearc
     }
 }
 
+internal enum class MediaLoadPhase { LOADING, ERROR, EMPTY, CONTENT }
+internal fun mediaLoadPhase(busy: Boolean, error: String?, hasContent: Boolean): MediaLoadPhase = when {
+    hasContent -> MediaLoadPhase.CONTENT
+    busy -> MediaLoadPhase.LOADING
+    error != null -> MediaLoadPhase.ERROR
+    else -> MediaLoadPhase.EMPTY
+}
+
+@Composable
+private fun MediaLoadStateTransition(state: MediaBrowserState, hasContent: Boolean, label: String,
+    modifier: Modifier = Modifier, content: @Composable (MediaBrowserState) -> Unit) {
+    EviloContentTransition(state, contentKey = { mediaLoadPhase(it.busy, it.error, hasContent) },
+        label = label, modifier = modifier.fillMaxWidth()) { displayed ->
+        if (displayed.busy) {
+            var visible by remember { mutableStateOf(false) }
+            LaunchedEffect(Unit) { visible = true }
+            AnimatedVisibility(visible, enter = fadeIn(EviloMotion.componentSpec()), exit = fadeOut(EviloMotion.exitSpec())) {
+                EviloLoadingState(stringResource(Res.string.source_loading_content))
+            }
+        } else content(displayed)
+    }
+}
+
 internal enum class CatalogLoadingPlacement { NONE, CENTER, FOOTER, PULL }
 
 internal fun catalogLoadingPlacement(busy: Boolean, hasItems: Boolean, refreshing: Boolean,
@@ -294,6 +325,36 @@ private fun mediaFailureTitle(page: MediaBrowserPage): String = stringResource(w
     MediaBrowserPage.DETAILS -> Res.string.source_details_failed
     MediaBrowserPage.READER -> Res.string.source_content_failed
 })
+
+internal const val MediaMinimumLoadingMillis = 400L
+
+internal fun mediaMinimumLoadingRemaining(elapsedMillis: Long): Long =
+    (MediaMinimumLoadingMillis - elapsedMillis).coerceIn(0L, MediaMinimumLoadingMillis)
+
+/** Delay presentation only, never the controller operation or its cancellation. */
+@Composable
+private fun rememberMediaLoadingPresentation(observed: MediaBrowserState, owner: Any): MediaBrowserState {
+    val destination = mediaPageKey(observed)
+    var presented by remember(owner) { mutableStateOf(observed) }
+    var started by remember(owner) { mutableStateOf<TimeSource.Monotonic.ValueTimeMark?>(null) }
+    LaunchedEffect(owner, destination, observed.busy) {
+        if (observed.busy) {
+            started = TimeSource.Monotonic.markNow()
+            presented = observed
+        } else {
+            if (mediaPageKey(presented) == destination && presented.busy) {
+                delay(mediaMinimumLoadingRemaining(started?.elapsedNow()?.inWholeMilliseconds ?: MediaMinimumLoadingMillis))
+            }
+            started = null
+            presented = observed.copy(busy = false)
+        }
+    }
+    // While loading, freeze only the content response. Header/page identity may
+    // update, but a short success/failure cannot replace the indicator mid-cycle.
+    return if (presented.busy && mediaPageKey(presented) == destination) {
+        observed.copy(busy = true, error = null, items = presented.items, chapters = presented.chapters, content = presented.content)
+    } else observed
+}
 
 /** Fade a newly populated region once; restoration and scrolling do not replay it. */
 @Composable
@@ -335,13 +396,16 @@ private fun MediaCatalog(state: MediaBrowserState, images: SessionImages, onSear
             }
             if (state.items.isEmpty()) {
                 Box(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()), contentAlignment = Alignment.Center) {
-                    when {
-                        state.error != null -> MediaLoadFailure(state, onRetry)
-                        loading == CatalogLoadingPlacement.CENTER -> EviloLoadingState(stringResource(Res.string.source_loading_content))
-                        loading == CatalogLoadingPlacement.PULL -> Unit
-                        else -> EviloEmptyState(EviloIcons.kind(state.kind), stringResource(Res.string.source_no_results),
-                            stringResource(Res.string.source_no_results_description)) {
-                            Button(onClick = { onSearch(query) }) { Text(stringResource(Res.string.source_reload)) }
+                    EviloContentTransition(state, contentKey = { mediaLoadPhase(it.busy, it.error, it.items.isNotEmpty()) },
+                        label = "catalog-load-state") { displayed ->
+                        when {
+                            displayed.busy && loading == CatalogLoadingPlacement.PULL -> Unit
+                            displayed.busy -> EviloLoadingState(stringResource(Res.string.source_loading_content))
+                            displayed.error != null -> MediaLoadFailure(displayed, onRetry)
+                            else -> EviloEmptyState(EviloIcons.kind(displayed.kind), stringResource(Res.string.source_no_results),
+                                stringResource(Res.string.source_no_results_description)) {
+                                Button(onClick = { onSearch(query) }) { Text(stringResource(Res.string.source_reload)) }
+                            }
                         }
                     }
                 }
@@ -407,12 +471,16 @@ private fun MediaDetails(state: MediaBrowserState, images: SessionImages, onChap
             item.description?.takeIf(String::isNotBlank)?.let { description -> item { Text(description, style = MaterialTheme.typography.bodyMedium) } }
             item { Text(stringResource(if (state.kind in setOf(MediaKind.ANIME, MediaKind.FILM)) Res.string.source_episodes
                 else Res.string.source_chapters, state.chapters.size), style = MaterialTheme.typography.titleMedium) }
-            if (state.chapters.isEmpty() && state.busy) item {
-                EviloLoadingState(stringResource(Res.string.source_loading_content))
-            }
-            if (state.chapters.isEmpty() && !state.busy) item {
-                if (state.error != null) MediaLoadFailure(state, onRetry)
-                else Text(stringResource(Res.string.source_no_chapters), style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
+            if (state.chapters.isEmpty()) item(key = "chapter-status") {
+                MediaLoadStateTransition(state, hasContent = false, label = "chapter-load-state",
+                    modifier = Modifier.animateItem(fadeInSpec = EviloMotion.componentSpec(),
+                        placementSpec = EviloMotion.spatialSpec(), fadeOutSpec = EviloMotion.exitSpec())) { displayed ->
+                    if (displayed.error != null) MediaLoadFailure(displayed, onRetry)
+                    else EviloEmptyState(EviloIcons.Book, stringResource(Res.string.source_no_chapters),
+                        stringResource(Res.string.source_load_failed_hint)) {
+                        OutlinedButton(onClick = onRetry) { Text(stringResource(Res.string.source_reload)) }
+                    }
+                }
             }
             itemsIndexed(state.chapters, key = { _, chapter -> chapter.id }) { index, chapter ->
                 Surface(onClick = { onChapter(index) }, shape = MaterialTheme.shapes.medium, color = colors.surface,
@@ -461,9 +529,10 @@ private fun MediaReader(state: MediaBrowserState, session: MediaSourceSession, i
             LazyColumn(state = listState, modifier = Modifier.widthIn(max = EviloLayout.ReaderMaxWidth).fillMaxSize()
                 .then(if (content != null) contentEntrance else Modifier),
                 contentPadding = PaddingValues(bottom = EviloSpacing.ExtraLarge), verticalArrangement = Arrangement.spacedBy(EviloSpacing.Small)) {
-                if (content == null && state.busy) item { EviloLoadingState(stringResource(Res.string.source_loading_content)) }
-                if (content == null && !state.busy && state.error != null) item {
-                    MediaLoadFailure(state, onRetry, Modifier.padding(horizontal = pagePadding))
+                if (content == null) item(key = "reader-status") {
+                    MediaLoadStateTransition(state, hasContent = false, label = "reader-load-state") { displayed ->
+                        if (displayed.error != null) MediaLoadFailure(displayed, onRetry, Modifier.padding(horizontal = pagePadding))
+                    }
                 }
                 content?.text?.let { text -> item { Text(text, Modifier.padding(pagePadding), style = MaterialTheme.typography.bodyLarge) } }
                 if (!content?.streams.isNullOrEmpty()) {

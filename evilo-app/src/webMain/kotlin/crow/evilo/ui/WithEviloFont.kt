@@ -1,49 +1,33 @@
 package crow.evilo.ui
 
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalFontFamilyResolver
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import crow.evilo.app.resources.ChillRoundMSemiBold
+import crow.evilo.app.resources.Res
 import org.jetbrains.compose.resources.ExperimentalResourceApi
 import org.jetbrains.compose.resources.preloadFont
 
-import crow.evilo.app.resources.ChillRoundMSemiBold
-import crow.evilo.app.resources.Res
-
 @OptIn(ExperimentalResourceApi::class)
 @Composable
-fun WithEviloFont(
-    content: @Composable () -> Unit
-) {
+fun WithEviloFont(content: @Composable (ready: Boolean) -> Unit) {
     val font by preloadFont(Res.font.ChillRoundMSemiBold, weight = FontWeight.SemiBold)
-
-    var fontFallbackInitialized by remember { mutableStateOf(false) }
     val fontFamilyResolver = LocalFontFamilyResolver.current
+    var fontFallbackInitialized by remember(fontFamilyResolver, font) { mutableStateOf(false) }
 
     LaunchedEffect(fontFamilyResolver, font) {
-        font?.let { font ->
-            fontFamilyResolver.preload(FontFamily(font))
+        font?.let {
+            fontFamilyResolver.preload(FontFamily(it))
             fontFallbackInitialized = true
         }
     }
 
-    if (fontFallbackInitialized) {
-        content()
-    } else {
-        // The viewport already has a canvas, which hides the HTML loading screen.
-        EviloTheme {
-            Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
-                }
-            }
-        }
-    }
+    // Storage and font loading share App's startup surface; neither needs a separate screen.
+    content(fontFallbackInitialized)
 }

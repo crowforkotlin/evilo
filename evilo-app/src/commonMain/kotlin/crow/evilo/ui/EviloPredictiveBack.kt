@@ -64,10 +64,13 @@ internal class EviloBackTransitionState<T>(initialState: T, private val contentK
 
     // Recomposition during a gesture must not overwrite either captured page.
     fun target(value: T): EviloTransitionPayload<T> =
-        if (previewing) transition.currentState else payloads.target(value)
+        if (previewing) checkNotNull(capturedTarget) else payloads.target(value)
     var previewing by mutableStateOf(false)
         private set
     var outgoing: T? by mutableStateOf(null)
+        private set
+    private var capturedTarget: EviloTransitionPayload<T>? = null
+    var seekSharedElements by mutableStateOf(false)
         private set
     var event by mutableStateOf(EviloBackEvent(0f))
         private set
@@ -77,7 +80,7 @@ internal class EviloBackTransitionState<T>(initialState: T, private val contentK
         private set
 
     suspend fun handle(progress: Flow<EviloBackEvent>, current: T, previous: T?, isCurrent: () -> Boolean, onBack: () -> Unit,
-        awaitNavigation: suspend () -> Unit = {}) {
+        awaitNavigation: suspend () -> Unit = {}, sharedElements: Boolean = false) {
         if (!isCurrent()) { progress.collect { }; return }
         val currentTarget = target(current)
         val previousTarget: EviloTransitionPayload<T>? = previous?.let { EviloTransitionPayload<T>(it, contentKey(it)) }
@@ -90,18 +93,27 @@ internal class EviloBackTransitionState<T>(initialState: T, private val contentK
                         started = true
                         startY = next.touchY
                         outgoing = current
+                        capturedTarget = currentTarget
+                        seekSharedElements = sharedElements
                         previewing = true
                         transition.snapTo(currentTarget)
                         // Mount the real destination without playing the ordinary slide/fade.
                         transition.seekTo(0f, previousTarget)
                     }
                     event = next.copy(progress = next.progress.coerceIn(0f, 1f))
+                    if (seekSharedElements) transition.seekTo(event.progress, previousTarget)
                 }
             }
             if (isCurrent()) {
                 if (started) {
-                    Animatable(0f).animateTo(1f, tween(EviloPredictiveMotion.CommitMillis, easing = EviloMotion.SettleEasing)) {
-                        commitFraction = value
+                    if (seekSharedElements && previousTarget != null) {
+                        transition.animateTo(previousTarget,
+                            tween(EviloPredictiveMotion.CommitMillis, easing = EviloMotion.SettleEasing))
+                        commitFraction = 1f
+                    } else {
+                        Animatable(0f).animateTo(1f, tween(EviloPredictiveMotion.CommitMillis, easing = EviloMotion.SettleEasing)) {
+                            commitFraction = value
+                        }
                     }
                 }
                 if (isCurrent()) {
@@ -118,10 +130,15 @@ internal class EviloBackTransitionState<T>(initialState: T, private val contentK
             }
         } catch (cancelled: CancellationException) {
             if (started && !committing && currentCoroutineContext().isActive) {
-                val cancelledEvent = event
-                Animatable(1f).animateTo(0f, tween(EviloPredictiveMotion.CancelMillis, easing = EviloMotion.SettleEasing)) {
-                    event = cancelledEvent.copy(progress = cancelledEvent.progress * value,
-                        touchY = startY + (cancelledEvent.touchY - startY) * value)
+                if (seekSharedElements) {
+                    transition.animateTo(currentTarget,
+                        tween(EviloPredictiveMotion.CancelMillis, easing = EviloMotion.SettleEasing))
+                } else {
+                    val cancelledEvent = event
+                    Animatable(1f).animateTo(0f, tween(EviloPredictiveMotion.CancelMillis, easing = EviloMotion.SettleEasing)) {
+                        event = cancelledEvent.copy(progress = cancelledEvent.progress * value,
+                            touchY = startY + (cancelledEvent.touchY - startY) * value)
+                    }
                 }
                 transition.snapTo(currentTarget)
             }
@@ -129,6 +146,8 @@ internal class EviloBackTransitionState<T>(initialState: T, private val contentK
         } finally {
             previewing = false
             outgoing = null
+            capturedTarget = null
+            seekSharedElements = false
             commitFraction = 0f
             event = EviloBackEvent(0f)
         }
@@ -143,12 +162,13 @@ internal fun <T> rememberEviloBackTransition(initialState: T, contentKey: (T) ->
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 internal fun <T> EviloPredictiveBackHandler(enabled: Boolean, state: EviloBackTransitionState<T>, current: T,
-    previous: T?, navigationKey: Any?, onBack: () -> Unit) {
+    previous: T?, navigationKey: Any?, onBack: () -> Unit, sharedElements: Boolean = false) {
     val latestCurrent by rememberUpdatedState(current)
     val latestPrevious by rememberUpdatedState(previous)
     val latestEnabled by rememberUpdatedState(enabled)
     val latestKey by rememberUpdatedState(navigationKey)
     val latestOnBack by rememberUpdatedState(onBack)
+    val latestSharedElements by rememberUpdatedState(sharedElements)
     val handler: suspend (Flow<EviloBackEvent>) -> Unit = remember(state) {
         { progress ->
             val startedKey = latestKey
@@ -161,7 +181,7 @@ internal fun <T> EviloPredictiveBackHandler(enabled: Boolean, state: EviloBackTr
                         snapshotFlow { latestKey }.first { it != startedKey }
                         withFrameNanos { }
                     }
-                })
+                }, sharedElements = latestSharedElements)
         }
     }
     if (!LocalInspectionMode.current) PredictiveBackHandler(enabled = enabled, onBack = remember(handler) {

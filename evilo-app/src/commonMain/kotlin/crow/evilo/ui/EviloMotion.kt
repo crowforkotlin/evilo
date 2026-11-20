@@ -106,6 +106,10 @@ internal fun <T> EviloPageTransition(
             val transform = when {
                 // A near-opaque enter keeps a seekable timeline without moving the destination.
                 // The graphics layer below owns the outgoing page's gesture motion.
+                previewing && backState?.seekSharedElements == true ->
+                    (fadeIn(EviloMotion.spatialSpec()) togetherWith
+                        (fadeOut(EviloMotion.spatialSpec()) + ExitTransition.KeepUntilTransitionsFinished))
+                        .apply { targetContentZIndex = -1f }
                 previewing -> (fadeIn(tween(EviloPredictiveMotion.CommitMillis), initialAlpha = 0.9999f) togetherWith
                     ExitTransition.KeepUntilTransitionsFinished).apply { targetContentZIndex = -1f }
                 initialState.key == this.targetState.key -> EnterTransition.None togetherWith ExitTransition.None
@@ -134,7 +138,8 @@ internal fun <T> EviloPageTransition(
         CompositionLocalProvider(LocalEviloPageActive provides active, LocalEviloAnimatedVisibilityScope provides this) {
             val density = LocalDensity.current.density
             val surface = MaterialTheme.colorScheme.background
-            val moving = previewing && backState?.outgoing?.let(contentKey) == contentKey(displayed)
+            val moving = previewing && backState?.seekSharedElements != true &&
+                backState?.outgoing?.let(contentKey) == contentKey(displayed)
             Box(Modifier.fillMaxSize().graphicsLayer {
                 if (moving && backState != null) {
                     val motion = EviloPredictiveMotion.geometry(backState.event.progress, backState.event.touchY - backState.startY,

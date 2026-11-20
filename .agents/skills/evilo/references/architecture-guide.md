@@ -37,8 +37,8 @@ in `~/.evilo/signing`, with its directory overridable through
 public material fails the build. Compilation never reads private keys, depends
 on `generatePluginSigningKeys`, or creates an authority.
 It then calls
-`PluginCatalogRepository.initialize(BundledPluginCatalogJson)`. Non-preview
-startup dispatches `PluginHomeIntent.Refresh`; previews explicitly use memory
+`PluginCatalogRepository.initialize()` without a default subscription/catalog. Non-preview
+startup dispatches `PluginHomeIntent.RefreshInstalled`; previews explicitly use memory
 stores. `KoinIsolatedContext` exposes the environment to Compose.
 
 Normal shutdown closes the home store, connection controller, Coil, HTTP
@@ -73,8 +73,10 @@ form text and local version selection may stay in Compose state.
   another key or signed manifest. A same-key re-sign of changed bytes is rejected.
   Legacy records lacking a digest require explicit review/reinstall; an unchanged
   release preserves its original timestamp. Every new third-party version needs
-  explicit approval. Each open fetches/verifies the signed manifest with a zero
-  TTL; the default Wasmline artifact cache reuses hash-checked modules. Debug builds
+  explicit approval. Each open revalidates the exact approved signed manifest;
+  successfully accepted bytes can come from the host-only persistent cache, with
+  remote fallback on a miss or rejected entry. The default Wasmline artifact cache
+  reuses hash-checked modules. Debug builds
   retain observable phase timings in `PluginConnectionState`, while release UI
   shows generic progress. Keep acceptance checks before publishing active sessions.
 - Installed Browse rows call `AppPluginController.open()`; their independent Info
@@ -89,9 +91,10 @@ form text and local version selection may stay in Compose state.
   Its Koin factory receives the session and selected `MediaKind`; the Compose
   route closes the controller and image scope on disposal. Nested Back retains
   catalog results/query and saveable list positions rather than searching again.
-  `EviloPredictiveBackHandler` mounts render-only back snapshots and transforms
-  the complete outgoing page (including app bar) using `EviloPredictiveMotion`;
-  gesture motion is separate from ordinary slide/fade. Only completion dispatches
+  `EviloPredictiveBackHandler` mounts render-only back snapshots. Details-to-catalog
+  Back seeks the shared-cover transition with gesture progress; other routes
+  transform the complete outgoing page (including app bar) using
+  `EviloPredictiveMotion`. Only completion dispatches
   Back. Cancellation retains the
   page/session, stale navigation keys cannot pop replacement pages, and root home
   Back remains available to the operating system. Keep the handler callback stable.
@@ -102,10 +105,11 @@ form text and local version selection may stay in Compose state.
 
 ## Catalog editing and parsing
 
-`plugin-repository/plugin.json` is the default editable catalog.
-`GenerateBundledPluginCatalog` in `evilo-build-logic/app` emits the Kotlin data
-consumed by `AppEnvironment`. `catalogFile` in `evilo-app/build.gradle.kts` and
-`DEFAULT_BUNDLED_CATALOG_URL` select the bundled file and refresh URL.
+`plugin-repository/plugin.json` is historical metadata, not a default catalog.
+`GenerateBundledPluginCatalog` is not wired into application startup. The old
+`official`/`bundled` ID-and-URL pairs are removed during stored-data restoration;
+user-added subscriptions on the same host remain and approved installations/KV
+are retained for explicit management.
 Other subscriptions may use any filename or no `.json` suffix: their response
 must pass `CatalogParser`; publishers need no PR to evilo or external schema file.
 `CatalogParser.parse()` reads a JSON object, calls `normalizeCatalogJson()` in
@@ -124,8 +128,7 @@ permissions. Compare fingerprints through an independent publisher channel;
 initial acceptance alone does not authenticate a real-world identity.
 `PluginCatalogRepository.releaseBlock()` rejects the same installed ID from a
 different publisher, including disabled-source copies; all existing copies must
-be uninstalled before changing publisher. All mandatory version floors, including
-the built-in source's floors, apply only to their own subscription. Preserve existing
+be uninstalled before changing publisher. All mandatory version floors apply only to their own subscription. Preserve existing
 Room records when changing source IDs/URLs and preserve recorded permissions when
 catalog defaults change.
 

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="evilo_startup_background">#F7FAF9</color>
+    <color name="evilo_startup_primary">#006A6B</color>
+    <style name="Theme.Evilo" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/evilo_startup_background</item>
+        <item name="android:colorAccent">@color/evilo_startup_primary</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+    <style name="Theme.Evilo.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/evilo_startup_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/evilo_splash_wordmark</item>
+        <item name="postSplashScreenTheme">@style/Theme.Evilo</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+</resources>

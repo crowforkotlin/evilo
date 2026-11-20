@@ -11,6 +11,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 /** Geometry and callback tests; mounted page rendering still requires platform validation. */
@@ -77,6 +78,29 @@ class EviloPredictiveBackTest {
         assertTrue(waited)
         assertFalse(state.previewing)
         assertEquals(0f, state.commitFraction)
+    }
+
+    @Test
+    fun sharedElementModeIsRetainedThroughCommitAndClearedAfterNavigation() = runTest {
+        val state = EviloBackTransitionState("details") { it }
+        val captured = state.target("details")
+        var returns = 0
+        withContext(TestFrameClock()) {
+            state.handle(flow {
+                emit(EviloBackEvent(0.3f))
+                assertTrue(state.seekSharedElements)
+                assertSame(captured, state.target("details"))
+                emit(EviloBackEvent(0.7f))
+            }, "details", "catalog", isCurrent = { true }, onBack = { returns++ },
+                awaitNavigation = {
+                    assertTrue(state.seekSharedElements)
+                    assertEquals("catalog", state.transition.currentState.value)
+                    assertSame(captured, state.target("catalog"))
+                }, sharedElements = true)
+        }
+        assertEquals(1, returns)
+        assertFalse(state.seekSharedElements)
+        assertFalse(state.previewing)
     }
 
     @Test

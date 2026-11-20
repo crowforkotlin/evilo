@@ -5,5 +5,5 @@ import crow.evilo.ui.WithEviloFont
 
 @Composable
 fun WebApp(debugDiagnostics: Boolean = false) {
-    WithEviloFont { App(debugDiagnostics) }
+    WithEviloFont { ready -> App(debugDiagnostics, contentReady = ready) }
 }

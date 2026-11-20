@@ -166,6 +166,23 @@ floating controls and Material modal scrims communicate elevation. Never encode
 selection or a warning only through color: retain labels, checks, or state
 semantics.
 
+## Startup
+
+- Android uses AndroidX Core SplashScreen for cold launch; iOS uses a static launch
+  storyboard. Both show the evilo wordmark on adaptive light/dark theme colors.
+- Android permission resolution shows the common startup surface without opening
+  application storage or starting source requests. The permission decision still
+  precedes `App()` initialization.
+- Android, iOS, desktop, JS, and Wasm JS share `AppStartupSurface`: wordmark,
+  expressive loading indicator, and localized loading label. Startup errors use
+  a scrollable centered retry state. Desktop does not create a separate fake OS
+  splash window.
+- Web's initial HTML shell uses matching branding and honors reduced motion.
+  Font preload and storage initialization share the Compose startup surface.
+- Once the environment and required font are ready, the splash fades away over
+  220ms to reveal the app. There is no fixed startup delay and no closed environment
+  retained solely for an outgoing animation.
+
 ## Navigation and responsive layout
 
 - Below 600 wide, use Material `NavigationBarItem`s with Browse and More over a
@@ -243,11 +260,19 @@ History, Updates, or Downloads items merely to fill four navigation slots.
   Catalog failures also support pull-to-refresh with Material's expressive loading
   indicator; chapter/detail failures retain explicit reload. Do not replace a failure
   with an empty successful result, or hide retry just because a toast disappears.
-- Plugin details contain scrollable identity, installation, source-copy, version,
-  installed release metadata, and actual-source sections. Bottom actions stay
+- Plugin details use a scrollable identity header with explicitly labeled package,
+  author, type, language, and dates; installation and version groups have rounded
+  surfaces. Do not repeat source copies for a single-source plugin or show the
+  region-provenance explanation. Ordinary source-code content shows URL/revision,
+  not archive URLs/hashes; keep signature fingerprints and approved manifest hashes
+  in Safety and the release approval dialog. Bottom actions stay
   separate from scrolling content. Browse is the action for an unchanged usable
   installation; updates/downgrades/reinstalls have explicit review labels. Uninstall
   sits in a separate destructive group and names the exact source installation.
+  Primary actions span the available width; secondary actions form a centered,
+  wrapping row. Source settings use a full-width error-container removal button
+  with explanation and the existing confirmation. Cache provenance is not a
+  transient list-item label; retain actual source errors and detailed check dates.
 - `PluginHomeStore` separates its `HomePage` return stack from one `HomeOverlay`.
   Only temporary selectors and approval/uninstall/source-removal confirmations
   are overlays; closing them retains the initiating page. Approval rechecks the
@@ -269,8 +294,10 @@ History, Updates, or Downloads items merely to fill four navigation slots.
   the transition overlay; keep the image approved through the normal Coil path.
   Placeholder/error differences crossfade inside those bounds. Changed URLs or
   missing/offscreen counterparts fall back to ordinary page/image transitions.
-  Disable cover sharing during predictive previews so it does not detach a cover
-  from the complete page being transformed by the gesture. Cover errors
+  Details-to-catalog predictive Back seeks shared cover bounds directly with gesture
+  progress. The page surfaces crossfade without a second scale/translation applied
+  to the cover; release settles to the catalog and cancellation restores details.
+  Other predictive destinations retain the complete-page gesture transform. Cover errors
   show a compact category and individual actions, with Details retaining retry
   when two 48 targets do not fit. Reader errors retain page numbers and separate
   retry/reopen actions. Original exception text never appears on covers.
@@ -349,8 +376,11 @@ History, Updates, or Downloads items merely to fill four navigation slots.
   preserve surrounding content. Each catalog operation chooses one presentation:
   center for an initial/search load, footer for pagination, or top for pull-refresh.
   The top pull indicator is mounted only during a gesture or pull-refresh, not
-  alongside center/footer loading. A failed request removes all indeterminate
-  indicators immediately, including the brief error-before-busy-clears state.
+  alongside center/footer loading. An observed content request keeps its loading
+  presentation for at least 400ms before showing success/failure; this is a UI-only
+  delay, not extra network time or delayed cancellation. Retry/loading/error states
+  crossfade; the indicator itself fades in. Navigation cancels obsolete presentation
+  delays, and a completed error shows no indeterminate indicator.
   Suppress the global progress bar throughout the plugin-browser route, including
   package failures, even if an unrelated source refresh is also running.
   Compose specs respect a supplied motion-duration scale; the HTML loading spinner

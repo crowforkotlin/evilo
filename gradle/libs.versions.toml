@@ -4,6 +4,7 @@ android-compileSdk = "37"
 android-minSdk = "24"
 android-targetSdk = "37"
 androidx-activity = "1.13.0"
+androidx-core-splashscreen = "1.0.1"
 coil = "3.6.3"
 composeMultiplatform = "1.12.2"
 datastore = "1.3.0"
@@ -27,6 +28,7 @@ evilo-plugin-sdk = "2.0.0"
 kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlin" }
 kotlinx-browser = { module = "org.jetbrains.kotlinx:kotlinx-browser", version.ref = "kotlinx-browser" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activity" }
+androidx-core-splashscreen = { module = "androidx.core:core-splashscreen", version.ref = "androidx-core-splashscreen" }
 androidx-datastore-core = { module = "androidx.datastore:datastore-core", version.ref = "datastore" }
 androidx-datastore-okio = { module = "androidx.datastore:datastore-core-okio", version.ref = "datastore" }
 androidx-room3-runtime = { module = "androidx.room3:room3-runtime", version.ref = "room3" }
