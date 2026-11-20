@@ -11,7 +11,9 @@ import crow.evilo.storage.EviloPreferences
 import crow.evilo.storage.EviloPreferencesCodec
 import crow.evilo.storage.MemoryDataStore
 import crow.evilo.storage.MemoryPluginCatalogStore
+import crow.evilo.storage.MemoryPluginManifestCache
 import crow.evilo.storage.PluginCatalogStore
+import crow.evilo.storage.PluginManifestCache
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -35,6 +37,7 @@ internal expect fun rememberAppStorageFactory(): AppStorageFactory
 internal class AppStorage(
     val preferences: DataStore<EviloPreferences>,
     val catalogs: PluginCatalogStore,
+    val manifests: PluginManifestCache,
     private val lifetime: Job? = null,
     private val closeBackend: suspend () -> Unit = {},
 ) {
@@ -51,7 +54,7 @@ internal class AppStorage(
     }
 
     companion object {
-        fun preview() = AppStorage(MemoryDataStore(EviloPreferences()), MemoryPluginCatalogStore())
+        fun preview() = AppStorage(MemoryDataStore(EviloPreferences()), MemoryPluginCatalogStore(), MemoryPluginManifestCache())
     }
 }
 
@@ -64,7 +67,7 @@ internal suspend fun createAppStorage(
     val lifetime = SupervisorJob(parentScope.coroutineContext[Job])
     try {
         val preferences = DataStoreFactory.create(storage = storage, scope = CoroutineScope(Dispatchers.Default + lifetime))
-        return AppStorage(preferences, database.catalogs(), lifetime) {
+        return AppStorage(preferences, database.catalogs(), database.manifests(), lifetime) {
             closeResources({ database.close() }, { afterDatabaseClose() })
         }
     } catch (failure: Throwable) {

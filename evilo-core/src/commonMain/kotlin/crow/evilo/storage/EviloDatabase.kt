@@ -11,6 +11,9 @@ import androidx.room3.RoomDatabase
 import androidx.room3.RoomDatabaseConstructor
 import androidx.room3.Transaction
 import androidx.room3.Upsert
+import androidx.room3.migration.Migration
+import androidx.sqlite.SQLiteConnection
+import androidx.sqlite.async.executeSQL
 import crow.evilo.plugin.api.PluginJson
 import crow.evilo.plugin.catalog.CatalogSubscription
 import crow.evilo.plugin.catalog.InstalledPlugin
@@ -121,13 +124,22 @@ abstract class RoomPluginCatalogStore : PluginCatalogStore {
 
 @Database(
     entities = [CatalogSourceEntity::class, CatalogCacheEntity::class, PluginInstallationEntity::class,
-        PluginUpdateFloorEntity::class, PluginDataDeletionEntity::class],
-    version = 1,
+        PluginUpdateFloorEntity::class, PluginDataDeletionEntity::class, PluginManifestCacheEntity::class],
+    version = 2,
     exportSchema = true,
 )
 @ConstructedBy(EviloDatabaseConstructor::class)
 abstract class EviloDatabase : RoomDatabase() {
     abstract fun catalogs(): RoomPluginCatalogStore
+    abstract fun manifests(): RoomPluginManifestCache
+
+    companion object {
+        val MIGRATION_1_2: Migration = object : Migration(1, 2) {
+            override suspend fun migrate(connection: SQLiteConnection) {
+                connection.executeSQL("CREATE TABLE IF NOT EXISTS `plugin_manifest_cache` (`manifestSha256` TEXT NOT NULL, `bytes` BLOB NOT NULL, `sizeBytes` INTEGER NOT NULL, `lastUsedEpochMillis` INTEGER NOT NULL, PRIMARY KEY(`manifestSha256`))")
+            }
+        }
+    }
 }
 
 @Suppress("KotlinNoActualForExpect")

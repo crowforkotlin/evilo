@@ -15,6 +15,7 @@ kotlin {
             api(libs.kotlinx.coroutines.core)
             api(libs.androidx.datastore.core)
             api(libs.androidx.room3.runtime)
+            implementation(libs.androidx.sqlite.async)
             api(libs.koin.core)
             implementation(libs.kotlinx.serialization.protobuf)
             implementation(libs.okio)

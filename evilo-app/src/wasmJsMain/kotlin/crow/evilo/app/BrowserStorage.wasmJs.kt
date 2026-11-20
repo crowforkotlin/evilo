@@ -17,6 +17,7 @@ internal actual fun createSqliteWorker(): Worker =
 
 internal actual fun createBrowserDatabase(worker: Worker): EviloDatabase =
     Room.databaseBuilder<EviloDatabase>("evilo.catalogs.db", EviloDatabaseConstructor::initialize)
+        .addMigrations(EviloDatabase.MIGRATION_1_2)
         .setDriver(WebWorkerSQLiteDriver(worker)).setJournalMode(RoomDatabase.JournalMode.TRUNCATE)
         .setQueryCoroutineContext(Dispatchers.Default).build()
 

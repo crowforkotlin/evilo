@@ -18,6 +18,7 @@ internal actual fun rememberAppStorageFactory(): AppStorageFactory {
     return remember(context) {
         AppStorageFactory { scope ->
             val database = Room.databaseBuilder<EviloDatabase>(context, "evilo.catalogs.db", EviloDatabaseConstructor::initialize)
+                .addMigrations(EviloDatabase.MIGRATION_1_2)
                 .setDriver(BundledSQLiteDriver()).setQueryCoroutineContext(Dispatchers.Default).build()
             createAppStorage(OkioStorage(FileSystem.SYSTEM, EviloPreferencesSerializer,
                 producePath = { context.filesDir.resolve("evilo.preferences.pb").absolutePath.toPath() }), database, scope)
