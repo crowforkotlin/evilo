@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="local_network_permission_denied">未允许局域网访问。使用局域网插件源前，请在系统设置中允许此应用的“附近设备”权限。</string>
+</resources>

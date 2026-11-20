@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="local_network_permission_denied">Local network access was denied. To use LAN plugin sources, allow Nearby devices in this app’s system permission settings.</string>
+</resources>

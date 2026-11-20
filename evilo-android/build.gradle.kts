@@ -19,6 +19,10 @@ dependencies {
     debugImplementation(libs.compose.uiTooling)
 }
 
+// Release signing credentials stay outside the repository: a machine that has them sets
+// `evilo.releaseStoreFile` and friends, typically in ~/.gradle/gradle.properties.
+val releaseStore = providers.gradleProperty("evilo.releaseStoreFile").orNull
+
 android {
     namespace = eviloProperty("EVILO_APPLICATION_ID")
     compileSdk = libs.versions.android.compileSdk.get().toInt()
@@ -36,8 +40,19 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+    signingConfigs {
+        if (releaseStore != null) {
+            create("release") {
+                storeFile = rootProject.file(releaseStore)
+                storePassword = providers.gradleProperty("evilo.releaseStorePassword").orNull
+                keyAlias = providers.gradleProperty("evilo.releaseKeyAlias").orNull
+                keyPassword = providers.gradleProperty("evilo.releaseKeyPassword").orNull
+            }
+        }
+    }
     buildTypes {
         release {
+            if (releaseStore != null) signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
