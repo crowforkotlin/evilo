@@ -21,6 +21,35 @@ import kotlin.test.assertTrue
 
 class BrowseProjectionTest {
     @Test
+    fun nsfwFilteringDoesNotHashTheCatalogueThroughPluginEntries() {
+        fun withoutCatalogueHash(entry: PluginEntry): PluginEntry {
+            val listing = checkNotNull(entry.listing)
+            val plugins = object : AbstractList<CatalogPlugin>() {
+                override val size = 1
+                override fun get(index: Int): CatalogPlugin {
+                    require(index == 0)
+                    return entry.plugin
+                }
+                override fun hashCode(): Int = error("Filtering must not hash a catalogue.")
+            }
+            return entry.copy(listing = listing.copy(snapshot = listing.snapshot.copy(
+                catalog = listing.snapshot.catalog.copy(plugins = plugins))))
+        }
+        val visible = withoutCatalogueHash(entry("a"))
+        val hidden = withoutCatalogueHash(entry("a", catalogPlugin().copy(id = "hidden.plugin", nsfw = true)))
+        val entries = listOf(visible, hidden)
+        val repository = catalog(entries)
+        val home = PluginHomeState(catalog = repository, entries = entries.associateBy { it.key })
+
+        val browse = projectBrowse(repository, home.entries)
+        assertEquals(1, browse.hiddenNsfw)
+        assertEquals(listOf(visible.key), browse.items.map { it.entry.key })
+        val management = projectInstalledManagement(home)
+        assertEquals(1, management.hiddenNsfw)
+        assertEquals(listOf(visible.key), management.groups.flatMap { group -> group.entries.map { it.key } })
+    }
+
+    @Test
     fun addingCatalogEntriesDoesNotCreateInstalledBrowseRows() {
         val entry = entry("a", installed = false)
         val state = catalog(listOf(entry))

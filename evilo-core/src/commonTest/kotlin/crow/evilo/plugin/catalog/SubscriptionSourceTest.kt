@@ -57,7 +57,7 @@ class SubscriptionSourceTest {
     fun aPointerResolvesToAnInstallablePlugin() = runBlocking {
         val (repository, transport) = repository()
         try {
-            repository.initialize("""{"name":"bundled","plugins":[]}""")
+            repository.initialize()
             repository.addSource("$base/repo.json", allowHttp = false)
             // The published plugin is classified NSFW, so the preference must be on before
             // it is installable; that is app policy, not a gap in the index.
@@ -79,7 +79,7 @@ class SubscriptionSourceTest {
             if (path == "/index.json.sig") HttpStatusCode.NotFound else null
         })
         try {
-            repository.initialize("""{"name":"bundled","plugins":[]}""")
+            repository.initialize()
             val failure = assertFailsWith<SourceFailure> { repository.addSource("$base/repo.json", false) }
             assertTrue(failure.message.orEmpty().contains("HTTP 404"), failure.message.orEmpty())
         } finally {

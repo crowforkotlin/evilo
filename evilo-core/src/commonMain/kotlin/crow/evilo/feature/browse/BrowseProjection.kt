@@ -66,7 +66,8 @@ fun projectBrowse(
     if (candidates.isEmpty()) return BrowseProjection(emptyReason = BrowseEmptyReason.SOURCE_FILTER)
     val hidden = candidates.filter { !catalog.showNsfw && catalog.isPluginNsfw(checkNotNull(it.installation).plugin.id) }
     val hiddenCount = if (catalog.mergeDuplicatePlugins) hidden.distinctBy { it.installation?.plugin?.id }.size else hidden.size
-    val visible = candidates - hidden.toSet()
+    val hiddenKeys = hidden.mapTo(HashSet()) { it.key }
+    val visible = candidates.filter { it.key !in hiddenKeys }
     if (visible.isEmpty()) return BrowseProjection(hiddenNsfw = hiddenCount, emptyReason = BrowseEmptyReason.NSFW_HIDDEN)
     val rows = if (catalog.mergeDuplicatePlugins && sourceId == null) {
         visible.groupBy { checkNotNull(it.installation).plugin.id }.map { (id, choices) ->
@@ -174,7 +175,9 @@ fun projectInstalledManagement(state: PluginHomeState): InstalledProjection {
     val installed = state.entries.values.filter { it.installation != null }
     val hidden = installed.filter { !state.catalog.showNsfw && state.catalog.isPluginNsfw(it.plugin.id) }
     val query = state.installedQuery.trim()
-    val visible = (installed - hidden.toSet()).filter { entry ->
+    val hiddenKeys = hidden.mapTo(HashSet()) { it.key }
+    val visible = installed.filter { entry ->
+        if (entry.key in hiddenKeys) return@filter false
         val source = state.catalog.sourceDisplayName(entry.sourceId)
         query.isEmpty() || (entry.plugin.name + " " + source).contains(query, ignoreCase = true)
     }

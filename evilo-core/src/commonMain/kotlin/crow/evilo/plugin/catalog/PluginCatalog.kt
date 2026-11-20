@@ -5,6 +5,7 @@ import kotlinx.serialization.Serializable
 import kotlin.time.Instant
 
 const val PLUGIN_CATALOG_SCHEMA_VERSION = 1
+// Historical automatically subscribed source identity and URL, retained only for stored-data migration.
 const val BUNDLED_SOURCE_ID = "bundled"
 const val DEFAULT_BUNDLED_CATALOG_URL =
     "https://raw.githubusercontent.com/crowforkotlin/evilo/main/plugin-repository/plugin.json"

@@ -75,7 +75,6 @@
     <string name="source_url">JSON source URL</string>
     <string name="source_http_consent">Allow unencrypted HTTP for this source and its declared downloads</string>
     <string name="source_add">Subscribe</string>
-    <string name="source_bundled">Built-in source (can be disabled)</string>
     <string name="source_remove">Remove</string>
     <string name="source_remove_title">Remove this source?</string>
     <string name="source_remove_description">The subscription and its installations are removed. Private plugin data is retained.</string>

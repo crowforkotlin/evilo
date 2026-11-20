@@ -20,7 +20,6 @@ import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpStatusCode
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -32,6 +31,99 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class PluginCatalogRepositoryTest {
+    @Test
+    fun freshInitializationHasNoSourcesCatalogsOrPlugins() = runTest {
+        val fixture = RepositoryFixture(pluginCatalog())
+        try {
+            fixture.repository.initialize()
+            fixture.repository.initialize()
+            val state = fixture.repository.state.value
+            assertTrue(state.initialized)
+            assertTrue(state.subscriptions.isEmpty())
+            assertTrue(state.snapshots.isEmpty())
+            assertTrue(state.listings.isEmpty())
+            assertTrue(state.installed.isEmpty())
+            assertTrue(state.sourceChecks.isEmpty())
+            assertTrue(fixture.records.read().subscriptions.isEmpty())
+            assertTrue(fixture.records.read().cachedCatalogs.isEmpty())
+            assertTrue(fixture.records.read().updateFloors.isEmpty())
+            fixture.repository.refresh()
+            assertTrue(fixture.requests.isEmpty())
+
+            val reopened = PluginCatalogRepository(fixture.records, fixture.preferences, fixture.transport, fixture.host)
+            reopened.initialize()
+            assertTrue(reopened.state.value.subscriptions.isEmpty())
+            assertTrue(reopened.state.value.listings.isEmpty())
+            assertTrue(reopened.state.value.installed.isEmpty())
+        } finally { fixture.transport.close() }
+    }
+
+    @Test
+    fun removingTheLegacyBundledSourceStaysEmptyAfterRestartAndRetainsPluginData() = runTest {
+        val fixture = RepositoryFixture(pluginCatalog())
+        try {
+            fixture.initialize()
+            val listing = fixture.repository.state.value.listings.single()
+            val release = listing.plugin.latestRelease
+            fixture.repository.recordInstallation(listing, release, listing.plugin.descriptor(release), "d".repeat(64))
+            fixture.writePluginValue(listing.plugin.id, "retained")
+            fixture.repository.removeSource(BUNDLED_SOURCE_ID)
+            val stored = fixture.records.read()
+            assertTrue(stored.subscriptions.isEmpty())
+            assertTrue(stored.cachedCatalogs.isEmpty())
+            assertTrue(stored.installed.isEmpty())
+            assertTrue(stored.updateFloors.isEmpty())
+            assertEquals("retained", fixture.readPluginValue(listing.plugin.id))
+
+            val reopened = PluginCatalogRepository(fixture.records, fixture.preferences, fixture.transport, fixture.host)
+            reopened.initialize()
+            reopened.refresh()
+            assertTrue(reopened.state.value.subscriptions.isEmpty())
+            assertTrue(reopened.state.value.snapshots.isEmpty())
+            assertTrue(reopened.state.value.listings.isEmpty())
+            assertTrue(reopened.state.value.installed.isEmpty())
+            assertTrue(fixture.requests.isEmpty())
+            assertEquals("retained", fixture.readPluginValue(listing.plugin.id))
+        } finally { fixture.transport.close() }
+    }
+
+    @Test
+    fun initializationRestoresStoredSourcesAndInstallationsWithoutASeed() = runTest {
+        val fixture = RepositoryFixture(pluginCatalog())
+        val cachedSource = CatalogSubscription("custom.saved", CUSTOM_URL, enabled = false)
+        val uncachedSource = CatalogSubscription("custom.uncached", "https://catalog.example.com/uncached.json")
+        val plugin = fixture.bundled.plugins.single()
+        val installation = InstalledPlugin(cachedSource.id, cachedSource.url, plugin, plugin.latestRelease,
+            "2026-11-09T00:00:00Z", false, "d".repeat(64))
+        val cachedJson = PluginJson.encodeToString(fixture.bundled)
+        try {
+            fixture.records.write(CatalogWrite(subscriptions = listOf(cachedSource, uncachedSource),
+                cachedCatalogs = mapOf(cachedSource.id to cachedJson), installed = listOf(installation)))
+            fixture.repository.initialize()
+            val state = fixture.repository.state.value
+            assertEquals(listOf(cachedSource, uncachedSource), state.subscriptions)
+            assertEquals(listOf(CatalogSnapshot(cachedSource, fixture.bundled, fromCache = true)), state.snapshots)
+            assertEquals(listOf(installation), state.installed)
+            assertEquals(state.subscriptions, fixture.records.read().subscriptions)
+            assertEquals(mapOf(cachedSource.id to cachedJson), fixture.records.read().cachedCatalogs)
+            assertEquals(listOf(installation), fixture.records.read().installed)
+            assertTrue(fixture.requests.isEmpty())
+        } finally { fixture.transport.close() }
+    }
+
+    @Test
+    fun aLegacyCacheWithoutASubscriptionDoesNotRestoreASource() = runTest {
+        val fixture = RepositoryFixture(pluginCatalog())
+        try {
+            fixture.records.write(CatalogWrite(cachedCatalogs = mapOf("official" to PluginJson.encodeToString(fixture.bundled))))
+            fixture.repository.initialize()
+            assertTrue(fixture.repository.state.value.subscriptions.isEmpty())
+            assertTrue(fixture.repository.state.value.snapshots.isEmpty())
+            assertTrue(fixture.repository.state.value.listings.isEmpty())
+            assertTrue(fixture.requests.isEmpty())
+        } finally { fixture.transport.close() }
+    }
+
     @Test
     fun cancellationDuringCatalogCommitStillPublishesDurableState() = runTest {
         val records = ControlledCatalogStore()
@@ -110,7 +202,7 @@ class PluginCatalogRepositoryTest {
             assertNull(fixture.repository.installationBlock(approved))
 
             val reopened = PluginCatalogRepository(fixture.records, fixture.preferences, fixture.transport, fixture.host)
-            reopened.initialize(PluginJson.encodeToString(fixture.bundled))
+            reopened.initialize()
             assertEquals(listOf(approved), reopened.state.value.installed)
             assertNull(reopened.installationBlock(approved))
         } finally { fixture.transport.close() }
@@ -250,7 +342,7 @@ class PluginCatalogRepositoryTest {
             }
 
             val reopened = PluginCatalogRepository(fixture.records, fixture.preferences, fixture.transport, fixture.host)
-            reopened.initialize(PluginJson.encodeToString(fixture.bundled))
+            reopened.initialize()
             reopened.refresh()
             assertEquals(listOf(installation), reopened.state.value.installed)
             assertNull(reopened.installationBlockReason(installation))
@@ -295,7 +387,7 @@ class PluginCatalogRepositoryTest {
                 installed = listOf(installation), updateFloors = mapOf("official:${plugin.id}" to 2L),
             ))
             fixture.writePluginValue(plugin.id, "retained")
-            fixture.initialize()
+            fixture.initialize(seedBundledCatalog = false)
             val state = fixture.repository.state.value
             val records = fixture.records.read()
             val migrated = installation.copy(sourceId = BUNDLED_SOURCE_ID, sourceUrl = DEFAULT_BUNDLED_CATALOG_URL)
@@ -306,17 +398,27 @@ class PluginCatalogRepositoryTest {
             assertEquals(setOf(BUNDLED_SOURCE_ID), records.cachedCatalogs.keys)
             val cached = PluginJson.decodeFromString<PluginCatalog>(records.cachedCatalogs.getValue(BUNDLED_SOURCE_ID))
             assertEquals(listOf(plugin), cached.plugins)
-            assertEquals(fixture.bundled.id, cached.id)
-            assertEquals(fixture.bundled.name, cached.name)
-            assertEquals(fixture.bundled.description, cached.description)
+            assertEquals(legacyCatalog, cached)
             assertEquals("retained", fixture.readPluginValue(plugin.id))
 
             val reopened = PluginCatalogRepository(fixture.records, fixture.preferences, fixture.transport, fixture.host)
-            reopened.initialize(PluginJson.encodeToString(fixture.bundled))
+            reopened.initialize()
             assertEquals(listOf(migrated), reopened.state.value.installed)
             assertFalse(reopened.state.value.subscriptions.single().enabled)
             reopened.setSourceEnabled(BUNDLED_SOURCE_ID, true)
             assertTrue(reopened.installationBlockReason(migrated).orEmpty().contains("mandatory"))
+            reopened.removeSource(BUNDLED_SOURCE_ID)
+            assertTrue(fixture.records.read().subscriptions.isEmpty())
+            assertTrue(fixture.records.read().cachedCatalogs.isEmpty())
+            assertTrue(fixture.records.read().installed.isEmpty())
+            assertTrue(fixture.records.read().updateFloors.isEmpty())
+            assertEquals("retained", fixture.readPluginValue(plugin.id))
+
+            val afterRemoval = PluginCatalogRepository(fixture.records, fixture.preferences, fixture.transport, fixture.host)
+            afterRemoval.initialize()
+            assertTrue(afterRemoval.state.value.subscriptions.isEmpty())
+            assertTrue(afterRemoval.state.value.snapshots.isEmpty())
+            assertTrue(afterRemoval.state.value.installed.isEmpty())
         } finally {
             fixture.transport.close()
         }
@@ -359,7 +461,7 @@ class PluginCatalogRepositoryTest {
             fixture.bundled = fixture.bundled.copy(plugins = fixture.bundled.plugins.map { it.copy(forceUpdate = false) })
             fixture.repository.refresh()
             val reopened = PluginCatalogRepository(fixture.records, fixture.preferences, fixture.transport, fixture.host)
-            reopened.initialize(PluginJson.encodeToString(pluginCatalog()))
+            reopened.initialize()
             assertTrue(reopened.installationBlockReason(reopened.state.value.installed.single()).orEmpty().contains("mandatory"))
         } finally {
             fixture.transport.close()
@@ -501,7 +603,7 @@ class PluginCatalogRepositoryTest {
             assertEquals("removed", fixture.readPluginValue(listing.plugin.id))
             failWrites = false
             val reopened = PluginCatalogRepository(fixture.records, preferences, fixture.transport, fixture.host)
-            reopened.initialize(PluginJson.encodeToString(fixture.bundled))
+            reopened.initialize()
             assertTrue(fixture.records.read().pendingDataDeletes.isEmpty())
             assertTrue(reopened.state.value.installed.isEmpty())
             assertNull(fixture.readPluginValue(listing.plugin.id))
@@ -679,7 +781,17 @@ class PluginCatalogRepositoryTest {
             // `runTest` drives a virtual clock, so the watchdog would fire before the engine resumes.
             requestTimeoutMillis = 0)
         val repository = PluginCatalogRepository(records, preferences, transport, host)
-        suspend fun initialize() { repository.initialize(PluginJson.encodeToString(bundled)) }
+        suspend fun initialize(seedBundledCatalog: Boolean = true) {
+            // This source is explicit test data, not a production startup default.
+            val stored = records.read()
+            if (seedBundledCatalog && stored.subscriptions.none { it.id == BUNDLED_SOURCE_ID || it.id == "official" }) {
+                records.write(CatalogWrite(
+                    subscriptions = listOf(CatalogSubscription(BUNDLED_SOURCE_ID, DEFAULT_BUNDLED_CATALOG_URL)) + stored.subscriptions,
+                    cachedCatalogs = mapOf(BUNDLED_SOURCE_ID to PluginJson.encodeToString(bundled)),
+                ))
+            }
+            repository.initialize()
+        }
         suspend fun writePluginValue(pluginId: String, value: String) {
             val session = preferences.pluginSession(pluginId)
             session.transaction { session.write("plugin.$pluginId", "setting", value) }

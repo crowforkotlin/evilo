@@ -67,7 +67,6 @@ class PluginCatalogRepository(
     private val preferences: EviloPreferencesRepository,
     private val transport: BoundedHttpTransport,
     val host: HostDescriptor,
-    private val bundledUrl: String = DEFAULT_BUNDLED_CATALOG_URL,
     private val officialKeys: WasmlineTrustedKeys = WasmlineTrustedKeys { _, _ -> null },
 ) {
     private val parser = CatalogParser()
@@ -83,41 +82,25 @@ class PluginCatalogRepository(
 
     private fun dataKey(pluginId: String, release: PluginRelease): String = publisherStorageKey(pluginId, release, officialKeys)
 
-    suspend fun initialize(bundledJson: String) = operations.withLock {
+    /** Restores stored subscriptions and installations; never supplies a default source or catalog. */
+    suspend fun initialize() = operations.withLock {
         if (mutableState.value.initialized) return@withLock
-        PluginUrlPolicy.check(bundledUrl)
-        val bundledSource = CatalogSubscription(BUNDLED_SOURCE_ID, bundledUrl)
         val stored = records.read()
         cleanupPluginData(stored.pendingDataDeletes)
-        // Rename the built-in subscription without losing its installations, cache, or version floors.
-        val saved = stored.subscriptions.map { source ->
+        // Retain the historical source as an ordinary removable subscription, if it exists.
+        val subscriptions = stored.subscriptions.map { source ->
             if (source.id == LEGACY_BUNDLED_SOURCE_ID) source.copy(id = BUNDLED_SOURCE_ID, url = migrateBundledUrl(source.url))
             else source
         }
-        require(saved.distinctBy { it.id }.size == saved.size &&
-            saved.distinctBy { it.url }.size == saved.size) { "Invalid stored plugin subscriptions." }
-        saved.forEach {
-            PluginUrlPolicy.check(it.url, it.allowHttp)
-            require(it.id != BUNDLED_SOURCE_ID || (it.url == bundledUrl && !it.allowHttp)) {
-                "Stored sources cannot replace the built-in source."
-            }
-        }
-        val subscriptions = listOf(saved.firstOrNull { it.id == BUNDLED_SOURCE_ID } ?: bundledSource) +
-            saved.filterNot { it.id == BUNDLED_SOURCE_ID }
+        require(subscriptions.distinctBy { it.id }.size == subscriptions.size &&
+            subscriptions.distinctBy { it.url }.size == subscriptions.size) { "Invalid stored plugin subscriptions." }
+        subscriptions.forEach { PluginUrlPolicy.check(it.url, it.allowHttp) }
         // Every cached catalogue is decoded here, which is the whole startup cost for a
         // large source. It runs on the default dispatcher because the caller is the main thread.
-        val bundled = withContext(Dispatchers.Default) { parser.parse(bundledJson, false) }
         val legacyCache = stored.cachedCatalogs[LEGACY_BUNDLED_SOURCE_ID]
         val snapshots = withContext(Dispatchers.Default) { subscriptions.mapNotNull { source ->
             val cachedJson = stored.cachedCatalogs[source.id] ?: legacyCache.takeIf { source.id == BUNDLED_SOURCE_ID }
-            val cached = cachedJson?.let { parser.parse(it, source.allowHttp) }?.let { catalog ->
-                if (source.id == BUNDLED_SOURCE_ID && catalog.id == LEGACY_BUNDLED_CATALOG_ID)
-                    catalog.copy(id = bundled.id, name = bundled.name, description = bundled.description)
-                else catalog
-            }
-            (cached ?: bundled.takeIf { source.id == BUNDLED_SOURCE_ID })?.let {
-                CatalogSnapshot(source, it, fromCache = cached != null)
-            }
+            cachedJson?.let { CatalogSnapshot(source, parser.parse(it, source.allowHttp), fromCache = true) }
         } }
         val installed = stored.installed.map { installation ->
             if (installation.sourceId == LEGACY_BUNDLED_SOURCE_ID)
@@ -150,8 +133,8 @@ class PluginCatalogRepository(
             preferences.currentSettings()
         } else storedSettings
         val floors = nextUpdateFloors(snapshots)
-        val migratedCache = if (legacyCache == null) emptyMap() else snapshots.filter { it.subscription.id == BUNDLED_SOURCE_ID }
-            .associate { it.subscription.id to PluginJson.encodeToString(it.catalog) }
+        val migratedCache = if (legacyCache != null && BUNDLED_SOURCE_ID !in stored.cachedCatalogs)
+            mapOf(BUNDLED_SOURCE_ID to legacyCache) else emptyMap()
         persistAndPublish(CatalogWrite(subscriptions = subscriptions, cachedCatalogs = migratedCache,
             removeCachedCatalogs = setOf(LEGACY_BUNDLED_SOURCE_ID), installed = installed.takeIf { it != stored.installed },
             updateFloors = floors)) {
@@ -225,7 +208,8 @@ class PluginCatalogRepository(
                 val snapshot = CatalogSnapshot(subscription, catalog)
                 val next = mutableState.value.snapshots.filterNot { it.subscription.id == subscription.id } + snapshot
                 val floors = nextUpdateFloors(next)
-                persistAndPublish(CatalogWrite(cachedCatalogs = mapOf(subscription.id to PluginJson.encodeToString(catalog)),
+                val cachedJson = withContext(Dispatchers.Default) { PluginJson.encodeToString(catalog) }
+                persistAndPublish(CatalogWrite(cachedCatalogs = mapOf(subscription.id to cachedJson),
                     updateFloors = floors)) {
                     updateFloors = floors
                     mutableState.update { it.copy(snapshots = next, sourceChecks = it.sourceChecks +
@@ -253,9 +237,9 @@ class PluginCatalogRepository(
         }
         // Network work stays outside the mutex, as in refresh.
         val text = download(checked, allowHttp)
-        val catalog = when (val content = classifySafely(text, allowHttp)) {
+        val catalog = when (val content = withContext(Dispatchers.Default) { classifySafely(text, allowHttp) }) {
             is SubscriptionContent.Pointer -> fetchIndex(content.document, allowHttp)
-            else -> parseCatalog(text, allowHttp)
+            else -> withContext(Dispatchers.Default) { parseCatalog(text, allowHttp) }
         }
         operations.withLock { addCatalogSource(checked, allowHttp, catalog) }
     }
@@ -285,8 +269,8 @@ class PluginCatalogRepository(
         }
     }
 
-    private fun catalogCache(catalogs: Map<String, PluginCatalog>): Map<String, String> =
-        catalogs.mapValues { PluginJson.encodeToString(it.value) }
+    private suspend fun catalogCache(catalogs: Map<String, PluginCatalog>): Map<String, String> =
+        withContext(Dispatchers.Default) { catalogs.mapValues { PluginJson.encodeToString(it.value) } }
 
     /** A stable, separator-free identity: the installation key joins id and plugin id with ':'. */
     private fun newSourceId(url: String): String {
@@ -298,7 +282,6 @@ class PluginCatalogRepository(
     }
 
     suspend fun removeSource(sourceId: String) = operations.withLock {
-        require(sourceId != BUNDLED_SOURCE_ID) { "The built-in source cannot be removed; disable it instead." }
         pinDefaultSources(state.value.installed.filter { it.sourceId == sourceId }.map { it.key }.toSet())
         val subscriptions = mutableState.value.subscriptions.filterNot { it.id == sourceId }
         val installed = mutableState.value.installed.filterNot { it.sourceId == sourceId }
@@ -611,14 +594,14 @@ class PluginCatalogRepository(
         return next
     }
 
-    private fun migrateBundledUrl(url: String): String = if (url == LEGACY_BUNDLED_CATALOG_URL) bundledUrl else url
+    private fun migrateBundledUrl(url: String): String =
+        if (url == LEGACY_BUNDLED_CATALOG_URL) DEFAULT_BUNDLED_CATALOG_URL else url
 
     private companion object {
         /** Parallel catalog fetches. Each source is one request, so a batch bounds memory and sockets. */
         const val REFRESH_CONCURRENCY = 6
 
         const val LEGACY_BUNDLED_SOURCE_ID = "official"
-        const val LEGACY_BUNDLED_CATALOG_ID = "evilo.official"
         const val LEGACY_BUNDLED_CATALOG_URL =
             "https://raw.githubusercontent.com/crowforkotlin/evilo/main/plugin-repository/official.json"
     }

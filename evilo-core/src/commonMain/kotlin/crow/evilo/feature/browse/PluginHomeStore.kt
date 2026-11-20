@@ -4,13 +4,13 @@ import crow.evilo.app.AppPluginController
 import crow.evilo.architecture.LatestOperation
 import crow.evilo.architecture.MviStore
 import crow.evilo.model.MediaKind
-import crow.evilo.plugin.catalog.BUNDLED_SOURCE_ID
 import crow.evilo.plugin.catalog.CatalogListing
 import crow.evilo.plugin.catalog.PluginBlock
 import crow.evilo.plugin.catalog.PluginBlockCode
 import crow.evilo.plugin.catalog.PluginCatalogRepository
 import crow.evilo.plugin.catalog.PluginRepositoryState
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
@@ -42,10 +42,18 @@ class PluginHomeStore(
 
     init {
         scope.launch {
+            var entryCatalog: PluginRepositoryState? = null
+            var cachedEntries: Map<String, PluginEntry> = emptyMap()
             combine(repository.state, connections.state) { _, _ -> Unit }.collect {
                 val catalog = repository.state.value
                 val connection = connections.state.value
-                val entries = entries(catalog)
+                // Rebuilding this map touches every listed plugin, so it stays off the
+                // main thread; the caller of this collector is the UI scope.
+                if (entryCatalog !== catalog) {
+                    cachedEntries = withContext(Dispatchers.Default) { entries(catalog) }
+                    entryCatalog = catalog
+                }
+                val entries = cachedEntries
                 val completed = connection.completedInstallation?.takeIf { it.serial != observedInstallation }
                 if (completed != null) observedInstallation = completed.serial
                 update { current ->
@@ -122,7 +130,7 @@ class PluginHomeStore(
                 if (!intent.enabled) closeSourceSession(intent.id)
                 repository.setSourceEnabled(intent.id, intent.enabled)
             }
-            is PluginHomeIntent.RequestSourceRemoval -> if (intent.id != BUNDLED_SOURCE_ID && hasSource(intent.id) && state.value.canMutate) {
+            is PluginHomeIntent.RequestSourceRemoval -> if (hasSource(intent.id) && state.value.canMutate) {
                 update { it.copy(overlay = HomeOverlay.RemoveSource(intent.id)) }
             }
             is PluginHomeIntent.ConfirmSourceRemoval -> if (state.value.canMutate && state.value.overlay == HomeOverlay.RemoveSource(intent.id)) {
@@ -309,9 +317,18 @@ class PluginHomeStore(
         mutableState.update { current ->
             val next = transform(current)
             val countSource = (next.page as? HomePage.SourceCatalog)?.id ?: next.browseSourceId
-            next.copy(browse = projectBrowse(next.catalog, next.entries, query = next.query, sourceId = next.browseSourceId,
-                searchLabels = next.searchLabels),
-                kindCounts = MediaKind.entries.associateWith { projectBrowse(next.catalog, next.entries, kind = it, sourceId = countSource).count })
+            val previousCountSource = (current.page as? HomePage.SourceCatalog)?.id ?: current.browseSourceId
+            val catalogChanged = next.catalog !== current.catalog || next.entries !== current.entries
+            val browseChanged = catalogChanged || next.query != current.query || next.browseSourceId != current.browseSourceId ||
+                next.searchLabels != current.searchLabels
+            val countsChanged = catalogChanged || countSource != previousCountSource
+            next.copy(
+                browse = if (browseChanged) projectBrowse(next.catalog, next.entries, query = next.query,
+                    sourceId = next.browseSourceId, searchLabels = next.searchLabels) else current.browse,
+                kindCounts = if (countsChanged) MediaKind.entries.associateWith {
+                    projectBrowse(next.catalog, next.entries, kind = it, sourceId = countSource).count
+                } else current.kindCounts,
+            )
         }
     }
 

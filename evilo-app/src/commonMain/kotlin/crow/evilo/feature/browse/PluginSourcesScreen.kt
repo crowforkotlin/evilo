@@ -44,7 +44,6 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import crow.evilo.app.resources.*
-import crow.evilo.plugin.catalog.BUNDLED_SOURCE_ID
 import crow.evilo.ui.EviloIcons
 import crow.evilo.ui.EviloLayout
 import crow.evilo.ui.EviloMotion
@@ -85,7 +84,6 @@ internal fun PluginSourcesScreen(state: PluginHomeState, dispatch: (PluginHomeIn
                                 enabled = state.canMutate, modifier = Modifier.heightIn(min = EviloLayout.MinimumTouchTarget)
                                     .semantics { contentDescription = toggleDescription })
                         }
-                        if (source.id == BUNDLED_SOURCE_ID) PluginBadge(stringResource(Res.string.source_bundled))
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             Text(stringResource(Res.string.source_install_counts,
                                 state.catalog.installed.count { it.sourceId == source.id },
@@ -161,7 +159,6 @@ internal fun PluginSourceSettingsScreen(state: PluginHomeState, id: String, disp
                 Column(Modifier.padding(EviloSpacing.Large), verticalArrangement = Arrangement.spacedBy(EviloSpacing.Medium)) {
                     SelectionContainer { Text(source.url, style = MaterialTheme.typography.bodyMedium) }
                     OutlinedButton(onClick = { clipboard.setText(AnnotatedString(source.url)) }) { Text(stringResource(Res.string.source_copy_url)) }
-                    if (source.id == BUNDLED_SOURCE_ID) Text(stringResource(Res.string.source_bundled), style = MaterialTheme.typography.bodySmall)
                     if (source.allowHttp) Text(stringResource(Res.string.plugin_http_warning), color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodySmall)
                 }
@@ -180,7 +177,7 @@ internal fun PluginSourceSettingsScreen(state: PluginHomeState, id: String, disp
             }
         }
         item { OutlinedButton(onClick = { dispatch(PluginHomeIntent.ShowSourceCatalog(id)) }) { Text(stringResource(Res.string.home_filter_all)) } }
-        if (id != BUNDLED_SOURCE_ID) item {
+        item {
             TextButton(onClick = { dispatch(PluginHomeIntent.RequestSourceRemoval(id)) }, enabled = state.canMutate,
                 colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) {
                 Text(stringResource(Res.string.source_remove))

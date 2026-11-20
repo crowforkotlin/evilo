@@ -75,7 +75,6 @@
     <string name="source_url">JSON 插件源地址</string>
     <string name="source_http_consent">允许此源及其声明的下载地址使用未加密 HTTP</string>
     <string name="source_add">订阅</string>
-    <string name="source_bundled">内置源（可停用）</string>
     <string name="source_remove">移除</string>
     <string name="source_remove_title">移除此插件源？</string>
     <string name="source_remove_description">会移除订阅和该源的插件安装记录，保留插件独立存储数据。</string>

@@ -34,6 +34,74 @@ import kotlin.test.assertTrue
 
 class PluginHomeStoreTest {
     @Test
+    fun anEmptyRepositoryCanOpenTheAddSourcePage() = runTest {
+        val fixture = HomeFixture(this)
+        try {
+            fixture.initialize(seedBundledCatalog = false)
+            assertTrue(fixture.store.state.value.catalog.subscriptions.isEmpty())
+            assertTrue(fixture.store.state.value.entries.isEmpty())
+            assertEquals(BrowseEmptyReason.NO_INSTALLATIONS, fixture.store.state.value.browse.emptyReason)
+            fixture.store.dispatch(PluginHomeIntent.ShowAddSource)
+            assertEquals(HomePage.AddSource, fixture.store.state.value.page)
+            assertTrue(fixture.sessions.isEmpty())
+        } finally { fixture.close() }
+    }
+
+    @Test
+    fun legacyBundledSourceRemovalRequiresConfirmationAndClosesItsSession() = runTest {
+        val fixture = HomeFixture(this)
+        try {
+            fixture.initialize()
+            fixture.installAll()
+            val installed = fixture.repository.state.value.installed.single()
+            fixture.store.dispatch(PluginHomeIntent.OpenPlugin(installed.key))
+            fixture.awaitIdle()
+            fixture.store.dispatch(PluginHomeIntent.RequestSourceRemoval(BUNDLED_SOURCE_ID))
+            assertEquals(HomeOverlay.RemoveSource(BUNDLED_SOURCE_ID), fixture.store.state.value.overlay)
+            assertEquals(1, fixture.repository.state.value.subscriptions.size)
+            assertEquals(0, fixture.sessions.single().closeCalls)
+            fixture.store.dispatch(PluginHomeIntent.ConfirmSourceRemoval(BUNDLED_SOURCE_ID))
+            fixture.awaitIdle()
+            assertTrue(fixture.store.state.value.catalog.subscriptions.isEmpty())
+            assertTrue(fixture.store.state.value.catalog.installed.isEmpty())
+            assertTrue(fixture.store.state.value.entries.isEmpty())
+            assertNull(fixture.store.state.value.overlay)
+            assertNull(fixture.store.state.value.page)
+            assertNull(fixture.store.state.value.connection.active)
+            assertNull(fixture.store.state.value.error)
+            assertEquals(1, fixture.sessions.single().closeCalls)
+        } finally { fixture.close() }
+    }
+
+    @Test
+    fun navigationAndConnectionErrorsReuseCatalogueEntriesAndBrowseProjections() = runTest {
+        val fixture = HomeFixture(this)
+        try {
+            fixture.initialize()
+            fixture.installAll()
+            val initial = fixture.store.state.value
+            fixture.store.dispatch(PluginHomeIntent.ShowAbout)
+            fixture.store.dispatch(PluginHomeIntent.ShowContentKinds)
+            val navigated = fixture.store.state.value
+            assertSame(initial.entries, navigated.entries)
+            assertSame(initial.browse, navigated.browse)
+            assertSame(initial.kindCounts, navigated.kindCounts)
+
+            fixture.connections.invalidate("Connection failed.")
+            fixture.awaitIdle()
+            val failed = fixture.store.state.value
+            assertSame(initial.entries, failed.entries)
+            assertSame(initial.browse, failed.browse)
+            assertSame(initial.kindCounts, failed.kindCounts)
+            assertEquals("Connection failed.", failed.connection.error)
+
+            fixture.store.dispatch(PluginHomeIntent.Search("no matching plugin"))
+            assertEquals(0, fixture.store.state.value.browse.count)
+            assertSame(initial.kindCounts, fixture.store.state.value.kindCounts)
+        } finally { fixture.close() }
+    }
+
+    @Test
     fun thirdPartyReleaseRequiresExplicitPublisherApprovalBeforeConnecting() = runTest {
         val original = catalogPlugin()
         val release = original.latestRelease.copy(
@@ -433,7 +501,7 @@ class PluginHomeStoreTest {
         }, scope)
         val store = PluginHomeStore(repository, connections, scope)
 
-        suspend fun initialize() { catalogs.initialize(); sync() }
+        suspend fun initialize(seedBundledCatalog: Boolean = true) { catalogs.initialize(seedBundledCatalog); sync() }
         suspend fun installAll() {
             repository.state.value.listings.forEach { repository.recordInstallation(it, it.plugin.latestRelease, it.plugin.descriptor(it.plugin.latestRelease), "d".repeat(64)) }
             sync()

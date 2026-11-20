@@ -4,7 +4,6 @@ import coil3.PlatformContext
 import crow.evilo.architecture.closeResources
 import crow.evilo.di.eviloCoreModule
 import crow.evilo.di.eviloUiModule
-import crow.evilo.feature.browse.BundledPluginCatalogJson
 import crow.evilo.feature.browse.PluginHomeStore
 import crow.evilo.network.ktor.BoundedHttpTransport
 import crow.evilo.plugin.api.HOST_HTTP_CAPABILITY
@@ -74,7 +73,7 @@ internal class AppEnvironment private constructor(
                 val imageLoader = container.koin.get<EviloImages>().also { images = it }
                 val controller = container.koin.get<AppPluginController>().also { connections = it }
                 val homeStore = container.koin.get<PluginHomeStore>().also { home = it }
-                container.koin.get<PluginCatalogRepository>().initialize(BundledPluginCatalogJson)
+                container.koin.get<PluginCatalogRepository>().initialize()
                 currentCoroutineContext().ensureActive()
                 return AppEnvironment(container, homeStore, controller, imageLoader, http, backend, lifetime)
             } catch (failure: Throwable) {

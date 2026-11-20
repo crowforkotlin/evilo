@@ -1,4 +1,3 @@
-import crow.evilo.buildlogic.GenerateBundledPluginCatalog
 import crow.evilo.buildlogic.GenerateEviloAppConfiguration
 import crow.evilo.buildlogic.GenerateEviloPluginKeys
 import crow.evilo.buildlogic.eviloPluginKeyDirectory
@@ -11,10 +10,6 @@ plugins {
     alias(libs.plugins.wasmline)
 }
 
-val bundledCatalog = tasks.register<GenerateBundledPluginCatalog>("generateBundledPluginCatalog") {
-    catalogFile.set(rootProject.layout.projectDirectory.file("plugin-repository/plugin.json"))
-    outputDirectory.set(layout.buildDirectory.dir("generated/bundledCatalog"))
-}
 val pluginKeys = tasks.register<GenerateEviloPluginKeys>("generatePluginSigningKeys") {
     group = "evilo"
     description = "Create the unique plugin-signing authority outside the repository; never overwrite existing keys."
@@ -30,11 +25,10 @@ val appConfiguration = tasks.register<GenerateEviloAppConfiguration>("generateEv
     appVersionCode.set(eviloProperty("EVILO_VERSION_CODE").toLong())
     outputDirectory.set(layout.buildDirectory.dir("generated/eviloConfiguration"))
 }
-tasks.withType<KotlinCompilationTask<*>>().configureEach { dependsOn(appConfiguration, bundledCatalog) }
+tasks.withType<KotlinCompilationTask<*>>().configureEach { dependsOn(appConfiguration) }
 
 kotlin {
     sourceSets.commonMain.get().kotlin.srcDir(appConfiguration.flatMap { it.outputDirectory })
-    sourceSets.commonMain.get().kotlin.srcDir(bundledCatalog.flatMap { it.outputDirectory })
     android {
         namespace = "${eviloProperty("EVILO_NAMESPACE")}.app.shared"
     }
@@ -72,7 +66,7 @@ kotlin {
         }
         webMain.dependencies {
             implementation(libs.androidx.sqlite.web)
-            implementation(libs.kotlin.dom.api)
+            implementation(libs.kotlinx.browser)
         }
     }
 }
