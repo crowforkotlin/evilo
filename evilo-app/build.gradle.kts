@@ -33,6 +33,11 @@ kotlin {
         namespace = "${eviloProperty("EVILO_NAMESPACE")}.app.shared"
     }
 
+    // Browser UI test bundles need the Skiko executable runtime even in this shared module.
+    js { binaries.executable() }
+    @OptIn(org.jetbrains.kotlin.gradle.ExperimentalWasmDsl::class)
+    wasmJs { binaries.executable() }
+
     targets.withType<KotlinNativeTarget>().configureEach {
         binaries.framework {
             baseName = "Evilo"
