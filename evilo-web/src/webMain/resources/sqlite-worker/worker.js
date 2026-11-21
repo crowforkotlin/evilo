@@ -107,7 +107,9 @@ function dispatch(data) {
             const statement = entry.database.prepare(data.sql);
             const statementId = nextStatementId++;
             statements.set(statementId, { statement, databaseId: data.databaseId });
-            return { statementId, parameterCount: statement.parameterCount, columnNames: statement.getColumnNames() };
+            // SQLite OO1 throws getColumnNames() for zero-column statements (DDL/PRAGMA writes).
+            return { statementId, parameterCount: statement.parameterCount,
+                columnNames: statement.columnCount > 0 ? statement.getColumnNames() : [] };
         }
         case "step": {
             const { statement } = required(statements, data.statementId, "statement");

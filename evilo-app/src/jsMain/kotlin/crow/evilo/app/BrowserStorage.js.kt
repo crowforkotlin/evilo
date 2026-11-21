@@ -20,10 +20,10 @@ internal actual fun createBrowserDatabase(worker: Worker): EviloDatabase =
         .setQueryCoroutineContext(Dispatchers.Default).build()
 
 internal actual fun supportsBrowserPersistence(): Boolean =
-    js("!!(self.isSecureContext && typeof Worker !== 'undefined' && navigator.storage?.getDirectory && navigator.locks)")
+    js("!!(self.isSecureContext && typeof Worker !== 'undefined' && navigator.storage && navigator.storage.getDirectory && navigator.locks)")
 
-internal actual fun sqliteWorkerReady(event: MessageEvent): Boolean = js("event.data?.eviloReady === true")
-internal actual fun sqliteWorkerClosed(event: MessageEvent): Boolean = js("event.data?.eviloClosed === true")
-internal actual fun sqliteWorkerError(event: MessageEvent): String? = js("typeof event.data?.error === 'string' ? event.data.error : null")
+internal actual fun sqliteWorkerReady(event: MessageEvent): Boolean = js("!!event.data && event.data.eviloReady === true")
+internal actual fun sqliteWorkerClosed(event: MessageEvent): Boolean = js("!!event.data && event.data.eviloClosed === true")
+internal actual fun sqliteWorkerError(event: MessageEvent): String? = js("event.data && typeof event.data.error === 'string' ? event.data.error : null")
 internal actual fun requestSqliteWorkerReady(worker: Worker): Unit = js("worker.postMessage({eviloInitialize: true})")
 internal actual fun requestSqliteWorkerClose(worker: Worker): Unit = js("worker.postMessage({eviloShutdown: true})")
