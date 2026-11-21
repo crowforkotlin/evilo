@@ -1,7 +1,11 @@
 import crow.evilo.buildlogic.eviloProperty
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 
-plugins { id("evilo.desktop.application") }
+plugins {
+    id("evilo.desktop.application")
+    // Resolve the engine's native host variant on the final application's runtime classpath.
+    alias(libs.plugins.wasmline)
+}
 
 dependencies {
     implementation(projects.eviloApp)
