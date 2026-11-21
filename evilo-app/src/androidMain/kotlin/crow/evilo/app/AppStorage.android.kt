@@ -9,8 +9,12 @@ import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import crow.evilo.storage.EviloDatabase
 import crow.evilo.storage.EviloDatabaseConstructor
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
 import okio.FileSystem
 import okio.Path.Companion.toPath
+
+// Kept outside the composition so consecutive Activity instances share the file lease.
+private val androidStorageAccess = Mutex()
 
 @Composable
 internal actual fun rememberAppStorageFactory(): AppStorageFactory {
@@ -21,7 +25,8 @@ internal actual fun rememberAppStorageFactory(): AppStorageFactory {
                 .addMigrations(EviloDatabase.MIGRATION_1_2)
                 .setDriver(BundledSQLiteDriver()).setQueryCoroutineContext(Dispatchers.Default).build()
             createAppStorage(OkioStorage(FileSystem.SYSTEM, EviloPreferencesSerializer,
-                producePath = { context.filesDir.resolve("evilo.preferences.pb").absolutePath.toPath() }), database, scope)
+                producePath = { context.filesDir.resolve("evilo.preferences.pb").absolutePath.toPath() }), database, scope,
+                access = androidStorageAccess)
         }
     }
 }

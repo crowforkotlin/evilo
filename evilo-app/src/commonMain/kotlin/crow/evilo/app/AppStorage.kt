@@ -62,16 +62,22 @@ internal suspend fun createAppStorage(
     storage: Storage<EviloPreferences>,
     database: EviloDatabase,
     parentScope: CoroutineScope,
+    access: Mutex? = null,
     afterDatabaseClose: suspend () -> Unit = {},
 ): AppStorage {
     val lifetime = SupervisorJob(parentScope.coroutineContext[Job])
+    var acquired = false
     try {
+        // Activity recreation can mount the replacement before the old composition finishes closing.
+        access?.lock()
+        acquired = access != null
         val preferences = DataStoreFactory.create(storage = storage, scope = CoroutineScope(Dispatchers.Default + lifetime))
         return AppStorage(preferences, database.catalogs(), database.manifests(), lifetime) {
-            closeResources({ database.close() }, { afterDatabaseClose() })
+            closeResources({ database.close() }, { afterDatabaseClose() }, { if (acquired) access?.unlock() })
         }
     } catch (failure: Throwable) {
-        try { closeResources({ lifetime.cancelAndJoin() }, { database.close() }, { afterDatabaseClose() }) }
+        try { closeResources({ lifetime.cancelAndJoin() }, { database.close() }, { afterDatabaseClose() },
+            { if (acquired) access?.unlock() }) }
         catch (closeFailure: Throwable) { if (failure !== closeFailure) failure.addSuppressed(closeFailure) }
         throw failure
     }

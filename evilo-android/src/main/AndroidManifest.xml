@@ -13,9 +13,11 @@
         android:supportsRtl="true"
         android:usesCleartextTraffic="true"
         android:theme="@style/Theme.Evilo">
+        <!-- Keep one storage-owning root when the launcher opens an existing app. -->
         <activity
             android:exported="true"
             android:name="crow.evilo.app.MainActivity"
+            android:launchMode="singleTask"
             android:theme="@style/Theme.Evilo.Starting"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
