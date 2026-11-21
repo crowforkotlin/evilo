@@ -14,7 +14,7 @@ import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -54,7 +54,7 @@ class SubscriptionSourceTest {
     }
 
     @Test
-    fun aPointerResolvesToAnInstallablePlugin() = runBlocking {
+    fun aPointerResolvesToAnInstallablePlugin() = runTest {
         val (repository, transport) = repository()
         try {
             repository.initialize()
@@ -74,7 +74,7 @@ class SubscriptionSourceTest {
     }
 
     @Test
-    fun aMissingSignatureIsReportedAsAnHttpFailure() = runBlocking {
+    fun aMissingSignatureIsReportedAsAnHttpFailure() = runTest {
         val (repository, transport) = repository(fault = { path ->
             if (path == "/index.json.sig") HttpStatusCode.NotFound else null
         })

@@ -50,6 +50,30 @@ class BrowseProjectionTest {
     }
 
     @Test
+    fun sixHundredPluginCatalogueProjectsWithoutDeepCatalogueHashing() {
+        val plugins = List(600) { index -> catalogPlugin().copy(id = "fixture.plugin$index", name = "Fixture $index") }
+        val catalogue = object : AbstractList<CatalogPlugin>() {
+            override val size = plugins.size
+            override fun get(index: Int) = plugins[index]
+            override fun hashCode(): Int = error("Large catalogue projections must not hash every plugin.")
+        }
+        val snapshot = CatalogSnapshot(CatalogSubscription("large", "https://large.example.com/catalog"),
+            pluginCatalog(catalogue))
+        val entries = plugins.map { plugin ->
+            entry("large", plugin).let { it.copy(listing = CatalogListing(snapshot, plugin)) }
+        }.associateBy { it.key }
+        val repository = PluginRepositoryState(initialized = true, subscriptions = listOf(snapshot.subscription),
+            snapshots = listOf(snapshot), installed = entries.values.map { checkNotNull(it.installation) })
+        val home = PluginHomeState(catalog = repository, entries = entries)
+        repeat(3) {
+            assertEquals(600, projectBrowse(repository, entries).count)
+            assertEquals(600, projectSourceCatalog(home, "large").entries.size)
+            assertEquals(600, projectInstalledManagement(home).groups.sumOf { group -> group.entries.size })
+            assertEquals(1, projectBrowse(repository, entries, query = "Fixture 599").count)
+        }
+    }
+
+    @Test
     fun addingCatalogEntriesDoesNotCreateInstalledBrowseRows() {
         val entry = entry("a", installed = false)
         val state = catalog(listOf(entry))

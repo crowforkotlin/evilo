@@ -5,7 +5,7 @@ import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpStatusCode
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -81,12 +81,12 @@ class PluginNetworkPolicyTest {
     }
 
     @Test
-    fun imageRequestFailureReportsTheStatus(): Unit = runBlocking {
+    fun imageRequestFailureReportsTheStatus() = runTest {
         var requests = 0
         val transport = BoundedHttpTransport(HttpClient(MockEngine {
             requests++
             respond("denied", HttpStatusCode.Forbidden)
-        }) { followRedirects = false })
+        }) { followRedirects = false }, requestTimeoutMillis = 0)
         try {
             assertEquals(403, assertFailsWith<HttpStatusException> {
                 PluginHttpClient(transport, policy).imageBytes("https://images.example.com/cover.png", emptyMap())
