@@ -17,6 +17,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
+/** Real path operations require Skia; Android host tests contain only android.graphics stubs. */
 class EviloDockGeometryTest {
     private val progressValues = listOf(0f, 0.1f, 0.25f, 0.5f, 0.75f, 0.9f, 1f)
 

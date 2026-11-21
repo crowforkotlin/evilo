@@ -333,13 +333,14 @@ internal fun mediaMinimumLoadingRemaining(elapsedMillis: Long): Long =
 
 /** Delay presentation only, never the controller operation or its cancellation. */
 @Composable
-private fun rememberMediaLoadingPresentation(observed: MediaBrowserState, owner: Any): MediaBrowserState {
+internal fun rememberMediaLoadingPresentation(observed: MediaBrowserState, owner: Any,
+    timeSource: TimeSource = TimeSource.Monotonic): MediaBrowserState {
     val destination = mediaPageKey(observed)
     var presented by remember(owner) { mutableStateOf(observed) }
-    var started by remember(owner) { mutableStateOf<TimeSource.Monotonic.ValueTimeMark?>(null) }
+    var started by remember(owner) { mutableStateOf<kotlin.time.TimeMark?>(null) }
     LaunchedEffect(owner, destination, observed.busy) {
         if (observed.busy) {
-            started = TimeSource.Monotonic.markNow()
+            started = timeSource.markNow()
             presented = observed
         } else {
             if (mediaPageKey(presented) == destination && presented.busy) {
