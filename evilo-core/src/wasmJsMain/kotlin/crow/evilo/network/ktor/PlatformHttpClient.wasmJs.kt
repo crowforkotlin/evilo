@@ -5,6 +5,7 @@ import io.ktor.client.engine.js.Js
 import kotlin.js.toJsString
 
 actual val supportsLocalPluginManifests: Boolean = false
+actual val supportsConcurrentPluginRuntime: Boolean = false
 
 actual fun createEviloHttpClient(): HttpClient = HttpClient(Js) {
     configureEviloHttp()

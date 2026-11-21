@@ -22,6 +22,9 @@ expect fun createEviloHttpClient(): HttpClient
 
 expect val supportsLocalPluginManifests: Boolean
 
+/** Browser Wasmline loads are single-threaded; native hosts retain internal runtime locks. */
+expect val supportsConcurrentPluginRuntime: Boolean
+
 internal fun HttpClientConfig<*>.configureEviloHttp() {
     expectSuccess = false
     followRedirects = false

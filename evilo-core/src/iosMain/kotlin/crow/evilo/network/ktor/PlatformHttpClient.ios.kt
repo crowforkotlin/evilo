@@ -9,6 +9,7 @@ import platform.Foundation.NSURLSessionAuthChallengeCancelAuthenticationChalleng
 import platform.Foundation.NSURLSessionAuthChallengePerformDefaultHandling
 
 actual val supportsLocalPluginManifests: Boolean = true
+actual val supportsConcurrentPluginRuntime: Boolean = true
 
 actual fun createEviloHttpClient(): HttpClient = HttpClient(Darwin) {
     configureEviloHttp()

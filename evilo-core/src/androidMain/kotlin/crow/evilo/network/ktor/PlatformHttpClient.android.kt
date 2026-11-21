@@ -6,6 +6,7 @@ import okhttp3.Authenticator
 import okhttp3.CookieJar
 
 actual val supportsLocalPluginManifests: Boolean = true
+actual val supportsConcurrentPluginRuntime: Boolean = true
 
 actual fun createEviloHttpClient(): HttpClient = HttpClient(OkHttp) {
     configureEviloHttp()

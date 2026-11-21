@@ -13,6 +13,7 @@ import crow.evilo.network.ktor.PackageNetworkPolicy
 import crow.evilo.network.ktor.PluginHttpClient
 import crow.evilo.network.ktor.PluginNetworkPolicy
 import crow.evilo.network.ktor.PolicyPackageNetworkClient
+import crow.evilo.network.ktor.supportsConcurrentPluginRuntime
 import crow.evilo.plugin.runtime.WasmlinePluginLoader
 import crow.evilo.storage.EviloPreferencesRepository
 import crow.evilo.storage.PluginManifestCache
@@ -75,7 +76,7 @@ class PluginSessionFactory(
             withContext(Dispatchers.Default) {
                 store.transaction { loaded = WasmlinePluginLoader(host, store, http).loadRemote(
                     packagePolicy.manifestUrl,
-                    WasmlineLoadOptions(runtimeConfig = WasmlineConfig(supportConcurrent = true), trustedKeys = verificationKeys,
+                    WasmlineLoadOptions(runtimeConfig = WasmlineConfig(supportConcurrent = supportsConcurrentPluginRuntime), trustedKeys = verificationKeys,
                         networkClient = packages,
                         // Keep the loader's URL/TTL manifest cache disabled so both local and remote
                         // bytes always pass through our pinned identity check and signature verifier.
